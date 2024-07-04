@@ -47,13 +47,13 @@ class ActionDistribution:
 
     def best_action(self):
         """
-        Most likely action sequence
+        Most likely action sequence (state)
         """
         return self.X[np.argmax(self.q)]
 
     def random_action(self):
         """
-        Weighted random out of possible action sequences
+        Weighted random out of possible action sequences (states)
         """
         return self.X[np.random.choice(len(self.q), p=self.q)]
 
@@ -164,9 +164,12 @@ class Tree:
             and store them for communication
         """
 
-        # For now, just using q = mu**2
+        # TODO For now, just using q = mu**2
         temp = nx.get_node_attributes(self.graph, "mu")
-        temp.pop(1, None)
+        temp.pop(1, None)  # remove root to leave children of temp
+
+        if len(temp) == 0:  # not enough children to create distribution
+            return False
 
         top_n_nodes = sorted(temp, key=temp.get, reverse=True)[:self.comm_n]
         X = [self.graph.nodes[n]["best_rollout"]
@@ -260,7 +263,6 @@ class Tree:
                     system_state,
                     self.id
                 )
-                print("Number of options:", len(options))
 
                 # If no actions possible, simulation complete
                 if len(options) == 0:

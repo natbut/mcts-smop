@@ -16,11 +16,10 @@ class Graph:
         self.cost_distributions = cost_distributions
 
     def get_stoch_cost(self, edge):
-        return np.random.choice(self.cost_distributions[edge])
+        random_sample = self.cost_distributions[edge].rvs(size=5)
+        return np.random.choice(random_sample)
 
     def get_mean_cost(self, edge):
-        print("Mean cost for", edge, ": ",
-              self.cost_distributions[edge].mean())
         return self.cost_distributions[edge].mean()
 
 

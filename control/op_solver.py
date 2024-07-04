@@ -1,5 +1,5 @@
 
-from DecMCTS import Tree
+from my_DecMCTS import Tree
 
 # TODO Define State, Reward, and other functions for DecMCTS
 

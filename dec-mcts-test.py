@@ -7,7 +7,7 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 import numpy as np
 
-from DecMCTS import Tree
+from my_DecMCTS import Tree
 
 
 class State:
