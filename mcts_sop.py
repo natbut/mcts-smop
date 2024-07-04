@@ -4,7 +4,6 @@
 # by Carpin and Thayer (2022)
 
 import random
-import time
 
 import numpy as np
 
@@ -16,8 +15,13 @@ class Graph:
         self.rewards = rewards
         self.cost_distributions = cost_distributions
 
-    def get_cost(self, edge):
+    def get_stoch_cost(self, edge):
         return np.random.choice(self.cost_distributions[edge])
+
+    def get_mean_cost(self, edge):
+        print("Mean cost for", edge, ": ",
+              self.cost_distributions[edge].mean())
+        return self.cost_distributions[edge].mean()
 
 
 class Node:
@@ -158,8 +162,6 @@ def rollout(node: Node, goal: str, graph: Graph, budget: int, failure_probabilit
 
 
 def backup(node: Node, reward, failure, allowed_fail_prob):
-    # TODO EVALUATE BACKUP with REWARD VAL STUFF
-
     node.reward = reward
     node.fail_prob = failure
     node.visits += 1
@@ -172,11 +174,11 @@ def backup(node: Node, reward, failure, allowed_fail_prob):
         # Better solution found (higher reward, lower failure)
         if parent.fail_prob >= node.fail_prob and parent.reward <= node.reward + graph.rewards[parent.state]:
             parent.fail_prob = node.fail_prob
-            parent.reward = node.reward + graph.rewards[parent.state]
+            parent.reward = node.reward + graph.rewards[parent.state]  # TODO
         # Okay solution found (higher reward, failure still within constraint)
         elif parent.fail_prob < node.fail_prob and parent.reward <= node.reward + graph.rewards[parent.state] and node.fail_prob < allowed_fail_prob:
             parent.fail_prob = node.fail_prob
-            parent.reward = node.reward + graph.rewards[parent.state]
+            parent.reward = node.reward + graph.rewards[parent.state]  # TODO
         # No backprop in all other cases
         else:
             parent.fail_prob = node.fail_prob
@@ -190,7 +192,7 @@ def backup(node: Node, reward, failure, allowed_fail_prob):
 def sopcc(graph, start: str, goal: str, budget, iterations, sample_iterations=10, failure_probability=0.1):
     # SOPCC (Alg. 2)
     print("=== Running SOPCC ===")
-    root = Node(start)
+    root = Node(start)  # initialize tree
     for _ in range(iterations):
         # Traverse tree (Select)
         node = root
@@ -202,7 +204,6 @@ def sopcc(graph, start: str, goal: str, budget, iterations, sample_iterations=10
         if node.visits > 0:
             # print("Node", node.state, "visited; expand")
             node = expand(node, graph)
-
         # Rollout
         reward, failure = rollout(
             node, goal, graph, budget, failure_probability)
@@ -243,37 +244,39 @@ def mcts_with_sopcc(graph: Graph, start: str, goal: str, budget, iterations,  fa
         return "Failure"
 
 
-# Parameters
-start = "vs"
-goal = "vg"
-budget = 10
-iterations = 100
-failure_probability = 0.1
+if __name__ == "__main__":
+    # Parameters
+    start = "vs"
+    goal = "vg"
+    budget = 10
+    iterations = 100
+    failure_probability = 0.1
 
-# Define the graph
-vertices = ["vs", "v1", "v2", "v3", "vg"]
-edges = [  # TODO make undirected (or add reverse direction)
-    ("vs", "v1"),
-    ("vs", "v2"),
-    ("v1", "v2"),
-    ("v1", "vg"),
-    ("v2", "v3"),
-    ("v2", "vg"),
-    ("v3", "vg"),
-]
-rewards = {"vs": 0, "v1": 10, "v2": 20, "v3": 15, "vg": 30}
-cost_distributions = {
-    ("vs", "v1"): [2, 3, 4],
-    ("vs", "v2"): [1, 2, 3],
-    ("v1", "v2"): [2, 2, 3],
-    ("v1", "vg"): [4, 5, 6],
-    ("v2", "v3"): [3, 4, 5],
-    ("v2", "vg"): [3, 4, 5],
-    ("v3", "vg"): [1, 2, 3],
-}
+    # Define the graph
+    vertices = ["vs", "v1", "v2", "v3", "vg"]
+    # TODO every vertex should have an edge directed from it to goal, but not necessarily to every other vertex
+    edges = [  # TODO make undirected (or add reverse directions)
+        ("vs", "v1"),
+        ("vs", "v2"),
+        ("v1", "v2"),
+        ("v1", "vg"),
+        ("v2", "v3"),
+        ("v2", "vg"),
+        ("v3", "vg"),
+    ]
+    rewards = {"vs": 0, "v1": 10, "v2": 20, "v3": 15, "vg": 30}
+    cost_distributions = {
+        ("vs", "v1"): [2, 3, 4],
+        ("vs", "v2"): [1, 2, 3],
+        ("v1", "v2"): [2, 2, 3],
+        ("v1", "vg"): [4, 5, 6],
+        ("v2", "v3"): [3, 4, 5],
+        ("v2", "vg"): [3, 4, 5],
+        ("v3", "vg"): [1, 2, 3],
+    }
 
-graph = Graph(vertices, edges, rewards, cost_distributions)
+    graph = Graph(vertices, edges, rewards, cost_distributions)
 
-result = mcts_with_sopcc(graph, start, goal, budget,
-                         iterations, failure_probability)
-print(result)
+    result = mcts_with_sopcc(graph, start, goal, budget,
+                             iterations, failure_probability)
+    print(result)

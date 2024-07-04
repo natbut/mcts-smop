@@ -1,8 +1,8 @@
-from argparse import ArgumentParser, Namespace
 import time
+from argparse import ArgumentParser, Namespace
 
-from sim.comms_manager import CommsManager
 from control.agent import generate_agents_from_config
+from sim.comms_manager import CommsManager
 from sim.environment import make_environment_from_config
 from utils.visualizer import set_up_visualizer_from_config
 
@@ -40,7 +40,8 @@ if __name__ == "__main__":
     print("Initialize")
 
     # Create environment
-    env = make_environment_from_config(args.config, args.topo_file, args.tide_folder)
+    env = make_environment_from_config(
+        args.config, args.topo_file, args.tide_folder)
 
     # Create agents
     agent_list = generate_agents_from_config(args.config)
@@ -48,7 +49,7 @@ if __name__ == "__main__":
     # Create comms framework (TBD - may be ROS)
     comms_mgr = CommsManager(env, agent_list)
 
-    # Set up initial state
+    # Set up initial env state
     for a in agent_list:
         a.sense_location_from_env(env)
         a.set_up_dim_ranges(env)
@@ -70,6 +71,7 @@ if __name__ == "__main__":
             a.sense_flow_from_env(env)
 
             # If new flow found (EVENT), do rescheduling
+            # TODO update to only reschedule after action is completed
             if a.event:
                 a.apply_observations_to_model()
                 # a.optimize_schedule() # TODO
