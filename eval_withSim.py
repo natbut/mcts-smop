@@ -88,7 +88,7 @@ if __name__ == "__main__":
         # Update message passing, also update comms graph
         comms_mgr.step()
 
-        # TODO add dynamic tour lines to graph
+        # Update visual
         viz.display_env(agent_list, static=False)
 
         i += 1

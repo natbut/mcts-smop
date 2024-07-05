@@ -7,23 +7,14 @@ import random
 
 import numpy as np
 
-
-class Graph:
-    def __init__(self, vertices, edges, rewards, cost_distributions):
-        self.vertices = vertices
-        self.edges = edges
-        self.rewards = rewards
-        self.cost_distributions = cost_distributions
-
-    def get_stoch_cost(self, edge):
-        random_sample = self.cost_distributions[edge].rvs(size=5)
-        return np.random.choice(random_sample)
-
-    def get_mean_cost(self, edge):
-        return self.cost_distributions[edge].mean()
+from utils.graphing import Graph
 
 
 class Node:
+    """
+    Node class for MCTS
+    """
+
     def __init__(self, state: str, parent=None):
         self.state = state
         self.parent = parent

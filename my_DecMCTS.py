@@ -227,6 +227,10 @@ class Tree:
     def grow(self, nsims=10, gamma=0.9, depth=10):  # TODO update grow to reflect SOPCC
         """
         Grow Tree by one node
+
+        - nsims is number of sim rollouts to run
+        - gamma for D-UCT values
+        - depth is how many rollout steps to run
         """
 
         # SELECTION
