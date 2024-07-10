@@ -133,8 +133,8 @@ if __name__ == "__main__":
 
     # === PROBLEM PARAMS ===
     problem_sizes = [20]
-    mean_range = (3, 10)
-    # stddev_range = (1, 10) # TODO address stddev
+    edges_mean_range = (3, 10)
+    c = 0.75  # variance modifier (0.05=low, 0.25=med, 0.75=high)
     trials = 5
     total_tests = 6
     num_robots = 8
@@ -157,8 +157,8 @@ if __name__ == "__main__":
             # Generate problem instance
             seed = np.random.randint(100)
             graph = create_sop_instance(size,
-                                        mean_range,
-                                        # stddev_range,
+                                        edges_mean_range,
+                                        c,
                                         rand_seed=seed)
             # Divide into det and stoch tests
             if test > total_tests/2:
