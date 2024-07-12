@@ -1,3 +1,5 @@
+from math import ceil
+
 import numpy as np
 from scipy.stats import norm
 
@@ -11,16 +13,16 @@ class Graph:
 
     def get_stoch_cost(self, edge):
         random_sample = self.cost_distributions[edge].rvs(size=5)
-        # print("Random sample for mean",
-        #       self.cost_distributions[edge].mean(), ":", random_sample)
-        return max(0, np.random.choice(random_sample))
+        return ceil(max(0, np.random.choice(random_sample)))
 
     def get_mean_cost(self, edge):
-        return self.cost_distributions[edge].mean()
+        return ceil(self.cost_distributions[edge].mean())
 
 
 def generate_cost_distributions(vertices, mean_range=(1, 5), c=0.05, seed=42):
-    # Create edge cost distributions between vertices in complete graph
+    """
+    Create edge cost distributions between vertices in complete graph
+    """
     np.random.seed(seed)
     cost_distributions = {}
     for v1 in vertices:
@@ -64,7 +66,10 @@ def create_sop_instance(num_vertices: int,
     # Generate rewards NOTE: vs and vg get rewards here
     rewards = {}
     for v in vertices:
-        rewards[v] = np.random.randint(reward_range[0], reward_range[1]+1)
+        if reward_range[0] == reward_range[1]:
+            rewards[v] = reward_range[0]
+        else:
+            rewards[v] = np.random.randint(reward_range[0], reward_range[1]+1)
     rewards["vs"] = 0
     rewards["vg"] = 0
 

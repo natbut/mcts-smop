@@ -1,12 +1,14 @@
 import math
+from copy import deepcopy
 
 import numpy as np
 import yaml
 
 from control.env_model import EnvironmentModel, TaskNode
-from control.op_solver import Scheduler
-from sim.comms_manager import CommsManager, Message
+from sim.comms_manager import CommsManager_Basic, Message
 from sim.environment import Environment
+from solvers.decMCTS_config import *
+from solvers.my_DecMCTS import Tree
 
 # Set up with local version of env_model and op_solver
 
@@ -21,49 +23,121 @@ class Agent:
         energy: int,
         env_dims: tuple,
         location: list[int],
+        prob_data: dict = None,
         velocity: float = 1.0,
     ) -> None:
+
         # Energy and position
         self.id = id
-        self.energy = energy
-        self.velocity = velocity
-        self.location = location
+        if prob_data:
+            self.data = prob_data
+            self.energy = self.data["budget"]
+            self.basic = True
+            self.travel_remaining = 0
+        else:
+            self.energy = energy
+            self.velocity = velocity
+            self.location = location
 
         # Environment status
-        self.env_dim_ranges = None
-        self.env_model = self.initialize_model(env_dims)
-        self.observations = []  # list of observations (grows over time)
+        if env_dims:
+            self.env_dim_ranges = None
+            self.env_model = self.initialize_model(env_dims)
+            self.observations = []  # list of observations (grows over time)
 
         # Communication variables TODO
+        self.received_comms = {}
         self.msg_queue = ...
         self.neighbors_status = (
             {}
         )  # dictionary of True/False reachable status, indexed by agent ID
 
         # Scheduling & control variables TODO
-        self.event = False
-        self.task_dict = {}  # dictionary of TaskNode objects, indexed by task IDs
-        self.scheduler = Scheduler()  # sop_solver
-        self.schedule = []  # List of Task IDs (queue?)
-        self.stored_schedules = (
-            {}
-        )  # Stored copies of other agents' schedules, indexed by agent IDs
+        self.event = True
+        self.action_dist = None
+        self.schedule = []
+        self.completed_tasks = []
 
         # Action variables
+        self.task_dict = {}
+        self.dead = False
+        self.finished = False
         self.IDLE = 0
         self.TRAVELING = 1
         self.WORKING = 2
-        self.action = [
-            self.IDLE,
-            -1,
-        ]  # Current action tuple (Traveling/Working/Idle, Task ID)
+        # Current action (Traveling/Working/Idle, Task ID)
+        self.action = [self.IDLE, None]
+
+        # Addt. parameters
         self.THRESHOLD = 1000  # TODO
         self.work_remaining = 0
         self.position_mod_vector = None
         self.flow = 0.0  # local flow
         self.energy_burn_rate = 0.001  # Wh / (m/s) # TODO
 
+    # === SCHEDULING ===
+
+    def optimize_schedule(self):
+        if self.data["start"] == self.data["end"]:
+            self.schedule = []
+            return
+        # Need all the supporting functions for the tree
+        tree = Tree(self.data,
+                    reward,
+                    avail_actions,
+                    state_storer,
+                    sim_select_action,
+                    sim_get_actions_available,
+                    comm_n=self.data["comm_n"],
+                    robot_id=self.id)
+        tree.comms = self.received_comms
+
+        self.event = False
+        # optimize schedule
+        for _ in range(self.data["plan_iters"]):
+            # Alg1. GROW TREE & UPDATE DISTRIBUTION
+            tree.grow()
+            # Alg1. TODO? COMMS TRANSMIT & COMMS RECEIVE
+            # for i in range(self.data["num_robots"]):
+            #     for j in range(self.data["num_robots"]):
+            #         if i != j:
+            #             self.tree.receive_comms(
+            #                 self.tree.send_comms(), j)
+            # Alg1. Cool?
+
+        # Alg1. Return action sequence
+        self.action_dist = tree.my_act_dist
+
+        # Store best as current schedule
+        self.schedule = tree.my_act_dist.best_action().action_seq
+        print(self.id, "Schedule:", self.schedule)
+
+    # === COMMS FUNCTIONS ===
+
+    # TODO check that this works
+
+    def update_reachable_neighbors(self, comms_mgr: CommsManager_Basic):
+        self.neighbors_status = comms_mgr.agent_comms_dict[self.id]
+
+    # create a message & send to neighbor via comms manager
+    # TODO add consideration for available neighbors
+    def send_message(self, comms_mgr: CommsManager_Basic, target_id: int, content=None):
+        msg = Message(self.id, target_id, content)
+        comms_mgr.add_message_for_passing(msg)
+
+    # receive a message
+    def receive_message(self, msg: Message):
+        # print("Message received by robot", self.id, ":", msg.content)
+        if msg.sender_id == -1:  # FROM MOTHERSHIP
+            self.schedule = msg.content
+        else:
+            self.received_comms[msg.sender_id] = msg.content
+
+    # TODO? function to process a message
+
+        # === REALISTIC SIM COMPONENTS ===
     # Set up to avoid repeated computations
+
     def set_up_dim_ranges(self, env: Environment):
         self.env_dim_ranges = env.get_dim_ranges()
 
@@ -132,88 +206,97 @@ class Agent:
                     )
                     task.set_distance_to_neighbor(id, dist_vec, mean, variance)
 
-    # === SCHEDULING ===
-
-    # TODO
-    def optimize_schedule(self):
-        self.event = False
-        # optimize schedule
-        self.schedule = self.scheduler.optimize_schedule(
-            self.task_dict, self.schedule, self.stored_schedules
-        )
-        # communicate optimized schedule
-
-    # === COMMS FUNCTIONS ===
-
-    # TODO check that this works
-    def update_reachable_neighbors(self, comms_mgr: CommsManager):
-        self.neighbors_status = comms_mgr.agent_comms_dict[self.id]
-
-    # create a message & send to neighbor via comms manager
-    # TODO add consideration for available neighbors
-    def send_message(self, comms_mgr: CommsManager, target_id: int, content=None):
-        msg = Message(self.id, target_id, content)
-        comms_mgr.add_message_for_passing(msg)
-
-    # receive a message
-    def receive_message(self, msg: Message):
-        print("Message received by robot", self.id, ":", msg.content)
-
-    # TODO function to process a message
-
     # === ACTIONS ===
 
-    def action_update(self):
+    def action_update(self, sim_config):
         """
         Update action according to current agent status and local schedule
         """
-        # print("Current agent action is", self.action) # ("IDLE", -1)
+        print("Agent", self.id, " Current agent action is", self.action,
+              " | Schedule:", self.schedule)  # ("IDLE", -1)
+        # === BREAKING CRITERIA ===
         # If out of energy, don't do anything
         if not self.have_energy_remaining():
             self.action[0] = self.IDLE
-            print("AGENT OUT OF ENERGY")
+            self.dead = True
+            print(self.id, "OUT OF ENERGY")
             return
 
         # If home and idle with no schedule, do nothing
-        if (
+        elif (
             self.action[0] == self.IDLE
-            and self.action[1] == -1
-            and len(self.schedule) == 0
+            and self.action[1] == self.data["end"]
         ):
+            self.finished = True
+            # print(self.id, "RETURNED TO BASE")
+            return
+        # Else awaiting a schedule command from comms
+        elif len(self.schedule) == 0 and self.action[1] == None:
             return
 
+        # === UPDATE FROM IDLE ===
         # 0) If Idle, Check if tour is complete
-        if self.action[0] == self.IDLE and len(self.schedule) == 0:
-            # print("Idle, empty schedule")
-            # If schedule is empty, return home
-            self.action[0] = self.TRAVELING
-            self.action[1] = -1
-        elif self.action[0] == self.IDLE and len(self.schedule) > 0:
+        # if self.action[0] == self.IDLE and len(self.schedule) == 0:
+        #     # print(self.id, "Idle, empty schedule")
+        #     # If schedule is empty, return home
+        #     # NOTE "Home" should now be scheduled as part of tour, so shouldn't see this used
+        #     self.action[0] = self.TRAVELING
+        #     self.action[1] = -1
+        # elif if top is used
+        if self.action[0] == self.IDLE and len(self.schedule) > 0:
             # otherwise, start tour & remove first element from schedule
-            # print("Traveling to new task")
             self.action[0] = self.TRAVELING
-            self.action[1] = self.schedule.pop(0)
+            leaving = self.schedule.pop(0)
+            self.action[1] = self.schedule[0]
 
+            if self.basic:
+                edge = (leaving, self.action[1])
+                # print(self.id, "Traveling to new task on edge", edge)
+                if "Stoch" in sim_config:
+                    self.travel_remaining = self.data["graph"].get_stoch_cost(
+                        edge)
+                    # print("STOCH EDGE")
+                else:
+                    self.travel_remaining = self.data["graph"].get_mean_cost(
+                        edge)
+                    # print("DET EDGE")
+                self.data["graph"].vertices.remove(leaving)
+                self.data["start"] = self.action[1]
+                # print(self.id, "Traveling to",
+                #   self.action[1], " with time", self.travel_remaining, " | Rem. Energy:", self.energy)
+
+        # 0) Update travel progress if traveling, check arrived
         task = self.task_dict[self.action[1]]
-        self.update_position_mod_vector()
+        arrived = False
+        # print(self.id, "Travel in progress...")
+        if self.action[0] == self.TRAVELING:
+            if self.basic:
+                self.travel_remaining -= 1
+                if self.travel_remaining <= 0:
+                    arrived = True
+            else:
+                self.update_position_mod_vector()
+                arrived = self.env_model.check_location_within_threshold(
+                    self.location, task.location, self.THRESHOLD
+                )
 
-        arrived = self.env_model.check_location_within_threshold(
-            self.location, task.location, self.THRESHOLD
-        )
         # 1) If traveling and arrived at task, begin work
         if self.action[0] == self.TRAVELING and arrived:
-            # print("Arrived at task. starting Work. Work remaining:", task.work)
+            # print(self.id, "Arrived at task. starting Work. Work remaining:", task.work)
             self.action[0] = self.WORKING
             self.work_remaining = task.work
 
+        # NOTE This "instantly" begins work
         # 2) If working and work is complete, become Idle
-        elif self.action[0] == self.WORKING and self.work_remaining <= 0:
-            # print("Work complete, becoming Idle")
+        if self.action[0] == self.WORKING and self.work_remaining <= 0:
+            # print(self.id, "Work complete, becoming Idle")
+            self.event = True
             self.action[0] = self.IDLE
+            self.completed_tasks.append(self.action[1])
         elif self.action[0] == self.WORKING and self.work_remaining > 0:
             # otherwise, continue working
-            # print("Work in progress")
-            self.work_remaining -= 1  # TODO modifier for work rate?
+            # print(self.id, "Work in progress")
+            self.work_remaining -= 1
 
     def have_energy_remaining(self) -> bool:
         return self.energy > 0
@@ -245,7 +328,7 @@ class Agent:
         # print("Command Vel", cmd_vel)
         return resultant_cmd_vel
 
-    def reduce_energy(self, vel_mag):
+    def reduce_energy_by_Vel(self, vel_mag):
         """
         Given a velocity, reduce energy for 1 timestep of holding
         that velocity
@@ -255,6 +338,27 @@ class Agent:
 
         self.energy -= self.energy_burn_rate * vel_mag
         print("Energy reduced to", self.energy)
+
+    def reduce_energy_basic(self):
+        if self.action[0] != self.IDLE:
+            # print(self.id, "Reducing energy")
+            self.data["budget"] -= 1
+            self.energy -= 1
+
+
+def generate_agents_with_data(data, tasks_work) -> list[Agent]:
+    agent_list = []
+    for i in range(data["num_robots"]):
+        a = Agent(i,
+                  energy=None,
+                  env_dims=None,
+                  location=None,
+                  prob_data=deepcopy(data)
+                  )
+        for key in tasks_work:
+            a.load_task(key, None, tasks_work[key])
+        agent_list.append(a)
+    return agent_list
 
 
 def generate_agents_from_config(config_filepath) -> list[Agent]:

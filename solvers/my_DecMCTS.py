@@ -283,7 +283,7 @@ class Tree:
                 system_state[self.id] = robot_temp_state
 
             # calculate the reward at the end of simulation
-            # TODO incorporate failure here
+            # TODO incorporate failure here for sopcc
             rew = self.reward(self.data, system_state)
             avg_reward += rew
             # if best reward so far, store the rollout in the new node

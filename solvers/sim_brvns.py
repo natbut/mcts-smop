@@ -74,7 +74,11 @@ def validateMergeDrivingConstraints(travelTimeNewRoute, budget):
 
 def updateSolution(newRoute, iRoute, jRoute, solution):
     solution.remove(iRoute)
-    solution.remove(jRoute)
+    try:  # TODO
+        solution.remove(jRoute)
+    except:
+        print("Unable to remove start", iRoute,
+              " and end", jRoute, " from", solution)
     solution.append(newRoute)
     return solution
 
@@ -142,6 +146,8 @@ def constructive_heuristic(graph: Graph,
         # print("Route start:", iRoute)
         jRoute = getClosingRoute(arc, solution)
         # print("Route end:", jRoute)
+        if iRoute == jRoute:
+            continue
         newRoute = mergeRoutes(iRoute, jRoute, arc)
         # print("New route:", newRoute)
         travelTimeNewRoute = calcRouteTravelTime(newRoute, graph)
@@ -185,7 +191,7 @@ def BRVNS(initial_solution,
           intensive_mcs_iters=1000
           ):
 
-    print("Initial Solution:", initial_solution)
+    # print("Initial Solution:", initial_solution)
     baseSol = initial_solution
     bestSol = initial_solution
     det_reward_base = det_reward(baseSol, graph)
@@ -196,18 +202,18 @@ def BRVNS(initial_solution,
                                                 )
     stoch_reward_base = stoch_reward
     stoch_reward_best = stoch_reward
+    # TODO plot & eval best vs base over time
 
     elite_solutions = [initial_solution]
     k = k_initial
     T = 1000
-    lamb = 0.999
+    lamb = 0.99  # 0.999
     time = 0
     # Phase 1 processing
     while time <= t_max:  # TODO introduce timeout
-        print("== TIME STEP", time, " ==")
-        time += 1
         k = k_initial  # degree of shaking destruction (1%-100%)
         while k <= k_max:
+            # print("== TIME STEP", time, " ==")
             newSol = shake(baseSol, k, k_max, graph, budget, end, alpha, beta)
             # Apply 2-opt procedure to each route until no further improvement
             newSol = two_opt(newSol, graph)
@@ -215,38 +221,48 @@ def BRVNS(initial_solution,
             newSol = remove_subset(newSol, graph)
             # Re-insert nodes with biased insertion procedure
             newSol = biased_insertion(newSol, graph, budget, beta2=0.3)
-            print("Post-VNS solution:", newSol, " | Current k:", k)
+            # print("Checking sol.:", newSol, " | Current k:", k)
 
-            if det_reward(newSol, graph) > det_reward_base:
-                print("Better than base det, check stoch")
-                stoch_reward, reliability = fast_simulation(newSol,
-                                                            graph,
-                                                            budget, intensive_mcs_iters)
+            det_reward_new = det_reward(newSol, graph)
+            # print("New det:", det_reward_new, " Base det:", det_reward_base)
+            if det_reward_new > det_reward_base:
+                # print("Better than base det, check stoch")
+                stoch_reward, _ = fast_simulation(newSol,
+                                                  graph,
+                                                  budget,
+                                                  intensive_mcs_iters
+                                                  )
                 if stoch_reward > stoch_reward_base:
-                    print("Better than base stoch; update base")
+                    # print("Better than base stoch; update base")
                     baseSol = newSol
                     stoch_reward_base = stoch_reward
                     if stoch_reward > stoch_reward_best:
-                        print("Better than best stoch; update best")
+                        # print("Better than best stoch; update best")
                         bestSol = newSol
                         stoch_reward_best = stoch_reward
                         elite_solutions.append(newSol)
                     k = k_initial
             else:
-                update_prob = prob_of_updating(det_reward(newSol, graph),
+                update_prob = prob_of_updating(det_reward_new,
                                                det_reward_base,
                                                T)
-                print("Update prob:", update_prob, " | T:", T)
-                if np.random.random() < update_prob:
-                    print("Update to excape minima")
+                # print("Update prob:", update_prob, " | T:", T)
+                if update_prob > np.random.random():  # TODO Does this work right?
+                    # print("Update to excape minima")
                     baseSol = newSol
-                    det_reward_base = det_reward(newSol, graph)
+                    det_reward_base = det_reward_new
                     k = k_initial
                 else:
                     k += 1
             T = T*lamb
 
+            # TODO - set up official timeout
+            time += 1
+            if time >= t_max:
+                break
+
     # Phase 2 processing
+    # TODO may want to return some set of "elites" as an initial action distro
     best_reliability = 0
     for sol in elite_solutions:
         stoch_reward_sol, reliability_sol = intensive_simulation(sol,
@@ -261,8 +277,8 @@ def BRVNS(initial_solution,
 
 def shake(solution, k, k_max, graph: Graph, budget, end, alpha, beta):
     # Destruction-reconstruction procedure
-    num_to_remove = int(len(solution) * (k/k_max))
-    # print("Removing", num_to_remove, " routes")
+    num_to_remove = math.ceil(len(solution) * (k/k_max))
+    # print("Removing", num_to_remove, " routes from", solution)
     new_solution = solution[:]
     # Randomly delete k% of routes from solution
     for _ in range(num_to_remove):
@@ -272,8 +288,11 @@ def shake(solution, k, k_max, graph: Graph, budget, end, alpha, beta):
     shake_graph = deepcopy(graph)
     # Remove nodes/edges currently in new_solution from shake graph
     for route in new_solution:
-        for vert in route[1:-1]:
-            shake_graph.vertices.remove(vert)
+        for i, vert in enumerate(route):
+            if vert != "vs" and vert != "vg":  # TODO do this right
+                shake_graph.vertices.remove(vert)
+            if i != len(route)-1:
+                shake_graph.edges.remove((vert, route[i+1]))
     # Merge solutions
     new_solution = constructive_heuristic(
         shake_graph, budget, num_to_remove, end, alpha, beta) + new_solution
@@ -285,8 +304,9 @@ def two_opt(solution, graph: Graph):
     """
     Perform a 2-opt local search on a given route.
     """
-    for route in solution:
+    for r, route in enumerate(solution):
         best_route = route[:]
+        # Goal is to untangle routes, thus reducing cost
         best_cost = route_det_cost(best_route, graph)
         improved = True
         # 2-opt route until no improvement
@@ -296,17 +316,19 @@ def two_opt(solution, graph: Graph):
                 for j in range(i + 1, len(route)):
                     if j - i == 1:
                         continue
-                    # TODO Route here is defined as edges, not nodes
                     new_route = route[:]
-                    # print("\nRoute:", new_route)
                     new_route[i:j] = route[j-1:i-1:-1]
-                    # print("Reversed:", new_route)
-                    cost = route_det_cost(new_route, graph)
+                    # print("check in 2-opt 2")
+                    try:
+                        cost = route_det_cost(new_route, graph)
+                    except:
+                        print("Failed switching", route, " to", new_route)
+                        exit()
                     if cost < best_cost:
                         best_route = new_route
                         best_cost = cost
                         improved = True
-        route = best_route
+        solution[r] = best_route
     return solution
 
 
@@ -356,6 +378,7 @@ def biased_insertion(solution, graph: Graph, budget, beta2=0.3):
                     test_route = route[:]
                     test_route.insert(i, node)
                     # Evaluate node if addition yields valid tour
+                    # print("check in BIASED INSERT")
                     if route_det_cost(test_route, graph) < budget:
                         cost_increase = graph.get_mean_cost(
                             (route[i-1], node)) + graph.get_mean_cost((node, route[i])) - graph.get_mean_cost((route[i-1], route[i]))
@@ -435,9 +458,7 @@ def intensive_simulation(elite_solutions, graph, budget, iterations):
 
 
 def prob_of_updating(newSol_profit, baseSol_profit, T):
-    print("profit diff:", newSol_profit-baseSol_profit)
-    print("exp:", (newSol_profit-baseSol_profit)//T)
-    return math.exp((newSol_profit-baseSol_profit)//T)
+    return math.exp((newSol_profit-baseSol_profit)/T)
 
 
 def sim_brvns(graph: Graph,
@@ -473,8 +494,8 @@ def sim_brvns(graph: Graph,
                                         exploratory_mcs_iters,
                                         intensive_mcs_iters
                                         )
-
-    print("Final solution:", final_solution, " | Reliability:", reliability)
+    return final_solution  # , reliability
+    # print("Final solution:", final_solution, " | Reliability:", reliability)
 
 
 if __name__ == "__main__":
@@ -501,7 +522,7 @@ if __name__ == "__main__":
                                 )
 
     num_robots = 3
-    budget = 25
+    budget = 20
 
     # TODO: Consider using a data dict
 
