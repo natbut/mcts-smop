@@ -5,18 +5,19 @@ from scipy.stats import norm
 
 
 class Graph:
-    def __init__(self, vertices, edges, rewards, cost_distributions):
+    def __init__(self, vertices, rewards, works, edges, cost_distributions):
         self.vertices = vertices
         self.edges = edges
         self.rewards = rewards
+        self.works = works
         self.cost_distributions = cost_distributions
 
     def get_stoch_cost(self, edge):
         random_sample = self.cost_distributions[edge].rvs(size=5)
-        return ceil(max(0, np.random.choice(random_sample)))
+        return self.works[edge[1]] + ceil(max(1, np.random.choice(random_sample)))
 
     def get_mean_cost(self, edge):
-        return ceil(self.cost_distributions[edge].mean())
+        return self.works[edge[1]] + ceil(self.cost_distributions[edge].mean())
 
 
 def generate_cost_distributions(vertices, mean_range=(1, 5), c=0.05, seed=42):
@@ -28,14 +29,8 @@ def generate_cost_distributions(vertices, mean_range=(1, 5), c=0.05, seed=42):
     for v1 in vertices:
         for v2 in vertices:
             if v1 != v2:
-                # Mean
                 mean = np.random.uniform(mean_range[0], mean_range[1])
-                # Stddev
-                stddev = (c * mean)**0.5  # c=0.75 from Panadero papers
-
-                # custom_range = (mean/2, mean)
-                # (stddev_range[0], stddev_range[1])
-                # stddev = np.random.uniform(custom_range[0], custom_range[1])
+                stddev = (c * mean)**0.5
                 cost_distributions[(v1, v2)] = norm(loc=mean, scale=stddev)
     return cost_distributions
 
@@ -44,9 +39,12 @@ def create_sop_instance(num_vertices: int,
                         mean_range=None,
                         c=0.05,
                         reward_range=(0, 10),
+                        work_range=(0, 0),
                         rand_seed=42
                         ) -> Graph:
-    # Create graph with stochastic edge costs and given number of vertices
+    """
+    Create graph with stochastic edge costs and given number of vertices
+    """
 
     # Generate vertices
     vertices = ["vs"]
@@ -73,4 +71,12 @@ def create_sop_instance(num_vertices: int,
     rewards["vs"] = 0
     rewards["vg"] = 0
 
-    return Graph(vertices, edges, rewards, cost_distributions)
+    # Generate work costs for each node
+    works = {}
+    for v in vertices:
+        if work_range[0] == work_range[1]:
+            works[v] = work_range[0]
+        else:
+            works[v] = np.random.randint(work_range[0], work_range[1]+1)
+
+    return Graph(vertices, rewards, works, edges, cost_distributions)

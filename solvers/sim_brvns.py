@@ -5,15 +5,16 @@ from copy import deepcopy
 import numpy as np
 from scipy.stats import geom
 
+from solvers.decMCTS_config import State
 from utils.graphing import Graph, create_sop_instance
 
 # === FUNCTIONS FOR BR CONSTRUCTIVE HEURISTIC ===
 
 
-def generateDummySolution(locations):
+def generateDummySolution(start, end, locations):
     # Generate an initial dummy solution where each location is connected to the origin and destination
-    dummy_solution = [[("vs", loc), (loc, "vg")]
-                      for loc in locations if loc != "vs" and loc != "vg"]
+    dummy_solution = [[(start, loc), (loc, end)]
+                      for loc in locations if loc != start and loc != end]
     return dummy_solution
 
 
@@ -121,6 +122,7 @@ def geometric_distribution_selection(list, beta):
 def constructive_heuristic(graph: Graph,
                            budget,
                            num_routes,
+                           start,
                            end,
                            alpha=0.5,
                            beta=0.3):
@@ -129,7 +131,7 @@ def constructive_heuristic(graph: Graph,
     locations = graph.vertices
     rewards = graph.rewards
     # Step 1: Generate initial dummy solution
-    solution = generateDummySolution(locations)
+    solution = generateDummySolution(start, end, locations)
     # print("Dummy solution:", solution)
 
     # Step 2: Compute sorted savings list
@@ -180,7 +182,7 @@ def constructive_heuristic(graph: Graph,
 def BRVNS(initial_solution,
           graph: Graph,
           budget: int,
-          num_robots: int,
+          start,
           end,
           alpha=0.5,
           beta=0.3,
@@ -194,7 +196,7 @@ def BRVNS(initial_solution,
     # print("Initial Solution:", initial_solution)
     baseSol = initial_solution
     bestSol = initial_solution
-    det_reward_base = det_reward(baseSol, graph)
+    det_reward_base = det_reward(baseSol, graph, budget)
     stoch_reward, reliability = fast_simulation(baseSol,
                                                 graph,
                                                 budget,
@@ -202,7 +204,6 @@ def BRVNS(initial_solution,
                                                 )
     stoch_reward_base = stoch_reward
     stoch_reward_best = stoch_reward
-    # TODO plot & eval best vs base over time
 
     elite_solutions = [initial_solution]
     k = k_initial
@@ -214,7 +215,8 @@ def BRVNS(initial_solution,
         k = k_initial  # degree of shaking destruction (1%-100%)
         while k <= k_max:
             # print("== TIME STEP", time, " ==")
-            newSol = shake(baseSol, k, k_max, graph, budget, end, alpha, beta)
+            newSol = shake(baseSol, k, k_max, graph,
+                           budget, start, end, alpha, beta)
             # Apply 2-opt procedure to each route until no further improvement
             newSol = two_opt(newSol, graph)
             # Remove a subset of nodes from each route
@@ -223,7 +225,7 @@ def BRVNS(initial_solution,
             newSol = biased_insertion(newSol, graph, budget, beta2=0.3)
             # print("Checking sol.:", newSol, " | Current k:", k)
 
-            det_reward_new = det_reward(newSol, graph)
+            det_reward_new = det_reward(newSol, graph, budget)
             # print("New det:", det_reward_new, " Base det:", det_reward_base)
             if det_reward_new > det_reward_base:
                 # print("Better than base det, check stoch")
@@ -256,13 +258,13 @@ def BRVNS(initial_solution,
                     k += 1
             T = T*lamb
 
-            # TODO - set up official timeout
+            # TODO - set up actual time-based timeout
             time += 1
             if time >= t_max:
                 break
 
     # Phase 2 processing
-    # TODO may want to return some set of "elites" as an initial action distro
+    # TODO? return some set of "elites" as an initial action distro
     best_reliability = 0
     for sol in elite_solutions:
         stoch_reward_sol, reliability_sol = intensive_simulation(sol,
@@ -272,10 +274,16 @@ def BRVNS(initial_solution,
             best_reliability = reliability_sol
             stoch_reward_best = stoch_reward_sol
 
-    return bestSol, best_reliability
+    # NOTE create a set of states for routes in bestSol
+    sol_as_states = []
+    for route in bestSol:
+        rem_budget = budget - route_det_cost(route, graph)
+        sol_as_states.append(State(route, rem_budget))
+
+    return sol_as_states, best_reliability
 
 
-def shake(solution, k, k_max, graph: Graph, budget, end, alpha, beta):
+def shake(solution, k, k_max, graph: Graph, budget, start, end, alpha, beta):
     # Destruction-reconstruction procedure
     num_to_remove = math.ceil(len(solution) * (k/k_max))
     # print("Removing", num_to_remove, " routes from", solution)
@@ -295,7 +303,7 @@ def shake(solution, k, k_max, graph: Graph, budget, end, alpha, beta):
                 shake_graph.edges.remove((vert, route[i+1]))
     # Merge solutions
     new_solution = constructive_heuristic(
-        shake_graph, budget, num_to_remove, end, alpha, beta) + new_solution
+        shake_graph, budget, num_to_remove, start, end, alpha, beta) + new_solution
     # print("Shake2 New Sol:", new_solution)
     return new_solution
 
@@ -404,10 +412,11 @@ def biased_insertion(solution, graph: Graph, budget, beta2=0.3):
     return solution
 
 
-def det_reward(solution, graph: Graph):
+def det_reward(solution, graph: Graph, budget):
     all_tasks_visited = []
     for route in solution:
-        all_tasks_visited += route
+        if route_det_cost(route, graph) < budget:
+            all_tasks_visited += route
     unique_tasks_visited = set(all_tasks_visited)
     return sum(graph.rewards[task_id] for task_id in unique_tasks_visited)
 
@@ -421,7 +430,7 @@ def stoch_reward(solution, graph: Graph, budget):
     fail = 0
     for route in solution:
         # Only apply tasks if route is a success
-        if route_stoch_cost(route, graph) <= budget:
+        if route_stoch_cost(route, graph) < budget:
             all_tasks_successfully_visited += route
         else:
             fail = 1
@@ -435,7 +444,7 @@ def route_stoch_cost(route, graph: Graph):
 
 def fast_simulation(solution, graph, budget, iterations):
     """
-    Get reward through MCS approach
+    Get reward through MCS approach. Return average reward and reliability (percent success)
     """
     rewards = []
     fails = 0
@@ -447,6 +456,9 @@ def fast_simulation(solution, graph, budget, iterations):
 
 
 def intensive_simulation(elite_solutions, graph, budget, iterations):
+    """
+    Get reward through MCS approach. Return average reward and reliability (percent success)
+    """
     # NOTE Same as fast simulation for now
     rewards = []
     fails = 0
@@ -463,7 +475,8 @@ def prob_of_updating(newSol_profit, baseSol_profit, T):
 
 def sim_brvns(graph: Graph,
               budget: int,
-              num_robots: int,
+              num_routes: int,
+              start,
               end,
               alpha=0.5,
               beta=0.3,
@@ -476,15 +489,17 @@ def sim_brvns(graph: Graph,
 
     initial_solution = constructive_heuristic(graph,
                                               budget,
-                                              num_robots,
+                                              num_routes,
+                                              start,
                                               end,
                                               alpha,
                                               beta=0.05  # det initial solution
                                               )
+
     final_solution, reliability = BRVNS(initial_solution,
                                         graph,
                                         budget,
-                                        num_robots,
+                                        start,
                                         end,
                                         alpha,
                                         beta,
@@ -495,7 +510,6 @@ def sim_brvns(graph: Graph,
                                         intensive_mcs_iters
                                         )
     return final_solution  # , reliability
-    # print("Final solution:", final_solution, " | Reliability:", reliability)
 
 
 if __name__ == "__main__":

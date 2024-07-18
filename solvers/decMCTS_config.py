@@ -36,7 +36,7 @@ def state_storer(data: dict, parent_state: State, action, id):
     cost = 0
     for i in range(len(actions)-1):
         edge = (actions[i], actions[i+1])
-        cost += data["graph"].get_mean_cost(edge)
+        cost += data["graph"].get_stoch_cost(edge)
     state.remaining_budget = data["budget"] - cost
     return state
 
@@ -119,11 +119,10 @@ def sim_select_action(data: dict, options: list, state: State):
     Choose an available option during simulation (can be random)
     FOR ROLLOUT
     """
-    # NOTE More intelligent selection choice (See SOPCC)
+    # NOTE Use more intelligent selection choice (See SOPCC)
     # from DecMCTS: Select next edge that does not exceed travel budget and maximizes ratio of increased reward to edge cost
-    # TODO this greedy criteria results in the same initial schedules being generated when starting from same node
     idx_max = np.argmax([data["graph"].rewards[o] /
-                        data["graph"].get_mean_cost((state.action_seq[-2], o)) for o in options])
+                        data["graph"].get_stoch_cost((state.action_seq[-2], o)) for o in options])
 
     return options[idx_max]
 

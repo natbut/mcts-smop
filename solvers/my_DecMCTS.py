@@ -117,7 +117,7 @@ class Tree:
 
         # Graph add root node of tree
         self.graph.add_node(1,
-                            mu=0,
+                            avg_reward=0,
                             N=0,
                             best_reward=0,
                             state=self.state_store(
@@ -145,7 +145,7 @@ class Tree:
         n_p = self.graph.nodes[self._parent(children[0])]["N"]
 
         # UCT values for children # TODO: use UCTF
-        uct = [_UCT(node["mu"], self.c_p, n_p, node["N"])
+        uct = [_UCT(node["avg_reward"], self.c_p, n_p, node["N"])
                for node in map(self.graph.nodes.__getitem__, children)]
 
         # Return Child with highest UCT
@@ -165,7 +165,7 @@ class Tree:
         """
 
         # TODO For now, just using q = mu**2
-        temp = nx.get_node_attributes(self.graph, "mu")
+        temp = nx.get_node_attributes(self.graph, "avg_reward")
         temp.pop(1, None)  # remove root to leave children of temp
 
         if len(temp) == 0:  # not enough children to create distribution
@@ -174,7 +174,7 @@ class Tree:
         top_n_nodes = sorted(temp, key=temp.get, reverse=True)[:self.comm_n]
         X = [self.graph.nodes[n]["best_rollout"]
              for n in top_n_nodes if self.graph.nodes[n]["N"] > 0]
-        q = [self.graph.nodes[n]["mu"] **
+        q = [self.graph.nodes[n]["avg_reward"] **
              2 for n in top_n_nodes if self.graph.nodes[n]["N"] > 0]
         self.my_act_dist = ActionDistribution(X, q)
         return True
@@ -214,7 +214,7 @@ class Tree:
         # create empty nodes underneath the node being expanded
         for o in options:
             self.graph.add_node(len(self.graph)+1,
-                                mu=0,
+                                avg_reward=0,
                                 best_reward=0,
                                 N=0,
                                 state=self.state_store(
@@ -256,7 +256,7 @@ class Tree:
         for i in range(nsims):
             robot_temp_state = self.graph.nodes[start_node]["state"]
             system_state[self.id] = robot_temp_state
-
+            cum_reward = 0
             d = 0  # depth
             while d < depth:  # also breaks at no available options
                 d += 1
@@ -272,12 +272,12 @@ class Tree:
                 if len(options) == 0:
                     break
 
-                # "randomly" choose 1 - function provided by user
-                # state[self.id] = temp_state
+                # NOTE introduced some randomness here using stoch. edge sampling for selecting next task. Should produce randomness over range nsims and lead to different rollouts
                 sim_action = self.sim_selection_func(
                     self.data, options, robot_temp_state)
 
                 # add that to the actions of the current robot
+                # NOTE introduced some randomness here using stoch. edge sampling for setting remaining_budget. May instead want to take an average of samples?
                 robot_temp_state = self.state_store(
                     self.data, robot_temp_state, sim_action, self.id)
                 system_state[self.id] = robot_temp_state
@@ -285,16 +285,16 @@ class Tree:
             # calculate the reward at the end of simulation
             # TODO incorporate failure here for sopcc
             rew = self.reward(self.data, system_state)
-            avg_reward += rew
+            cum_reward += rew
             # if best reward so far, store the rollout in the new node
             if rew > best_reward:
                 best_reward = rew
                 best_rollout = copy(robot_temp_state)
 
-        avg_reward = avg_reward / nsims
+        avg_reward = cum_reward / nsims
 
         # TODO backprop logic from SOPCC
-        self.graph.nodes[start_node]["mu"] = avg_reward
+        self.graph.nodes[start_node]["avg_reward"] = avg_reward
         self.graph.nodes[start_node]["best_reward"] = best_reward
         self.graph.nodes[start_node]["N"] = 1
         self.graph.nodes[start_node]["best_rollout"] = copy(best_rollout)
@@ -304,8 +304,8 @@ class Tree:
 
             start_node = self._parent(start_node)
 
-            self.graph.nodes[start_node]["mu"] = \
-                (gamma * self.graph.nodes[start_node]["mu"] *
+            self.graph.nodes[start_node]["avg_reward"] = \
+                (gamma * self.graph.nodes[start_node]["avg_reward"] *
                  self.graph.nodes[start_node]["N"] + avg_reward) \
                 / (self.graph.nodes[start_node]["N"] + 1)
 

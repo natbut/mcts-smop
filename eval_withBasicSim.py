@@ -5,9 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from control.agent import Agent, generate_agents_with_data
-from control.mothership import Mothership
+from control.mothership import generate_mothership_with_data
 from sim.comms_manager import CommsManager_Basic
-from solvers.sim_brvns import sim_brvns
 from utils.graphing import Graph, create_sop_instance
 
 
@@ -23,8 +22,7 @@ def calculate_reward(graph: Graph, agent_list: list[Agent]):
     # print("unique tasks visited:", unique_tasks_visited)
     return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) / len(graph.vertices)
 
-
- # Define framework for doing DecMCTS with multiple agents on generic graph 
+ # Define framework for doing DecMCTS with multiple agents on generic graph
 if __name__ == "__main__":
 
     print("Initialize Simulation")
@@ -34,19 +32,22 @@ if __name__ == "__main__":
     edges_mean_range = (3, 10)
     reward_range = (1, 1)
     c = 0.75  # variance modifier (0.05=low, 0.25=med, 0.75=high)
-    num_robots = 8
+    num_robots = 6
     budget = 20
-    trials = 5
+    velocity = 1
+    trials = 10
     # == Define each type of test that will run on each test case (trial)
-    sim_configs = ["Cent | Det",
-                   "Cent | Stoch",
-                   "Dist | Det",
-                   "Dist | Stoch",
-                   ]
+    sim_configs = [  # "Hybrid | Det",
+        "Hybrid | Stoch",
+        "Cent | Det",
+        "Cent | Stoch",
+        #    "Dist | Det",
+        "Dist | Stoch",
+    ]
 
     # === DEFINE SOLVER PARAMETERS ===
     # == Dec-MCTS Params
-    planning_iters = 10  # TODO
+    planning_iters = 100  # TODO try increasing this
     comm_n = 5  # Number of Action Sequences to communicate in distr
     failure_probability = 0.1  # for stoch
     # == Sim-BRVNS Params
@@ -55,7 +56,7 @@ if __name__ == "__main__":
     beta = 0.3  # (0,1), controls greediness in constructive heuristic
     k_initial = 1
     k_max = 10
-    t_max = 200  # Maximum execution time
+    t_max = 100  # Maximum execution time
     exploratory_mcs_iters = 10
     intensive_mcs_iters = 100
 
@@ -68,6 +69,10 @@ if __name__ == "__main__":
     centr_det_percentDead = []
     centr_stoch_results = []
     centr_stoch_percentDead = []
+    hybrid_det_results = []
+    hybrid_det_percentDead = []
+    hybrid_stoch_results = []
+    hybrid_stoch_percentDead = []
 
     for tr in range(trials):
         print("\n==== Trial", tr, " ====")
@@ -78,27 +83,24 @@ if __name__ == "__main__":
                                     c,
                                     reward_range,
                                     rand_seed=np.random.randint(100))
-        tasks_work = {}
-        for v in graph.vertices:
-            tasks_work[v] = 0  # TODO roll work into graph cost in future
         start = "vs"
         end = "vg"
 
         # == Bundle Data
-        dec_mcts_data = {"graph": deepcopy(graph),
-                         "start": start,
-                         "end": end,
-                         "budget": budget,
-                         "num_robots": num_robots,
+        # NOTE: Maybe we create these data bundles within agents
+        sim_data = {"graph": deepcopy(graph),
+                    "start": start,
+                    "end": end,
+                    "budget": budget,
+                    "velocity": velocity,
+                    "basic": True
+                    }
+        dec_mcts_data = {"num_robots": num_robots,
                          "fail_prob": failure_probability,
                          "comm_n": comm_n,
                          "plan_iters": planning_iters
                          }
-        sim_brvns_data = {"graph": deepcopy(graph),
-                          "start": start,
-                          "end": end,
-                          "budget": budget,
-                          "num_robots": num_robots,
+        sim_brvns_data = {"num_robots": num_robots,
                           "alpha": alpha,
                           "beta": beta,
                           "k_initial": k_initial,
@@ -113,47 +115,39 @@ if __name__ == "__main__":
             # Run simulation (planning, etc.)
 
             # Create agents
-            agent_list = generate_agents_with_data(dec_mcts_data, tasks_work)
-            mothership = Mothership(-1, sim_brvns_data, tasks_work)
+            agent_list = generate_agents_with_data(dec_mcts_data, sim_data)
+            mothership = generate_mothership_with_data(
+                sim_brvns_data, sim_data)
 
             # Create comms framework (TBD - may be ROS)
             # TODO set up comms failures
             comms_mgr = CommsManager_Basic(agent_list)
 
             # == If Centralized, Generate Plan & Load on Agents
-            if "Cent" in sim_config:
+            if "Cent" in sim_config or "Hybrid" in sim_config:
                 # Plan on mothership
                 print("Solving schedules...")
-                initial_solution = mothership.solve_schedules()
+                mothership.solve_STOP_schedules(comms_mgr, agent_list)
                 print("Executing schedules...")
-
-                # Communicate plan to agents
-                for target in agent_list:
-                    mothership.send_message(
-                        comms_mgr, target.id, initial_solution[target.id])
-                schedules_shared = False
-                while not schedules_shared:
-                    comms_mgr.step()
-                    schedules_shared = True
-                    for a in agent_list:
-                        if a.schedule == None:
-                            schedules_shared = False
 
             # Run Sim
             running = True
             i = 0
             while running:
-                print("TIME STEP:", i)
+                print("== TIME STEP:", i)
                 for a in agent_list:
+                    print("= Agent", a.id)
                     # Each time action is complete, do rescheduling (if distr)
-                    if a.event and "Dist" in sim_config:
+                    if a.event and ("Dist" in sim_config or "Hybrid" in sim_config) and not a.finished:
+                        if "Hybrid" in sim_config:
+                            # Solve for centralized action update
+                            print("Solving hybrid schedule...")
+                            mothership.solve_new_tour_single(comms_mgr,
+                                                             a,
+                                                             agent_list
+                                                             )
                         # Solve for new action distro
-                        a.optimize_schedule()
-                        # Send new action dist to other agents
-                        for target in agent_list:
-                            if target.id != a.id:
-                                a.send_message(comms_mgr, target.id,
-                                               a.action_dist)
+                        a.optimize_schedule(comms_mgr, agent_list)
 
                     # Update current action
                     a.action_update(sim_config)
@@ -169,59 +163,77 @@ if __name__ == "__main__":
                         running = True
 
                 i += 1
+                # time.sleep(0.1)
 
             print("Done")
 
             # Store results
             reward = calculate_reward(graph, agent_list)
-            if sim_config == "Dist | Det":
-                distr_det_results.append(reward)
-                distr_det_percentDead.append(
-                    sum(a.dead for a in agent_list) / num_robots)
-            elif sim_config == "Dist | Stoch":
-                distr_stoch_results.append(reward)
-                distr_stoch_percentDead.append(
-                    sum(a.dead for a in agent_list) / num_robots)
-            elif sim_config == "Cent | Det":
+            percentDead = sum(a.dead for a in agent_list) / num_robots
+            # if sim_config == "Dist | Det":
+            #     distr_det_results.append(reward)
+            #     distr_det_percentDead.append(
+            #         sum(a.dead for a in agent_list) / num_robots)
+            if sim_config == "Cent | Det":
                 centr_det_results.append(reward)
-                centr_det_percentDead.append(
-                    sum(a.dead for a in agent_list) / num_robots)
+                centr_det_percentDead.append(percentDead)
             elif sim_config == "Cent | Stoch":
                 centr_stoch_results.append(reward)
-                centr_stoch_percentDead.append(
-                    sum(a.dead for a in agent_list) / num_robots)
+                centr_stoch_percentDead.append(percentDead)
+            elif sim_config == "Dist | Stoch":
+                distr_stoch_results.append(reward)
+                distr_stoch_percentDead.append(percentDead)
+            # elif sim_config == "Hybrid | Det":
+            #     hybrid_det_results.append(reward)
+            #     hybrid_det_percentDead.append(
+            #         sum(a.dead for a in agent_list) / num_robots)
+            elif sim_config == "Hybrid | Stoch":
+                hybrid_stoch_results.append(reward)
+                hybrid_stoch_percentDead.append(percentDead)
 
-    print("DEAD Distr DET:", np.mean(distr_det_percentDead),
-          "\nDEAD Distr STOCH:", np.mean(distr_stoch_percentDead),
-          "\nDEAD Centr DET:", np.mean(centr_det_percentDead),
-          "\nDEAD Centr STOCH:", np.mean(centr_stoch_percentDead))
+    print(  # "DEAD Distr DET:", np.mean(distr_det_percentDead),
+        "\nDEAD Distr STOCH:", np.mean(distr_stoch_percentDead),
+        "\nDEAD Centr DET:", np.mean(centr_det_percentDead),
+        "\nDEAD Centr STOCH:", np.mean(centr_stoch_percentDead),
+        #   "\nDEAD Hybrid DET:", np.mean(hybrid_det_percentDead),
+        "\nDEAD Hybrid STOCH:", np.mean(hybrid_stoch_percentDead))
 
     # Plot results
     fig, ax = plt.subplots()
-    x = ["DecMCTS in Det", "DecMCTS in Stoch",
-         "Sim-BRVNS in Det", "Sim-BRVNS in Stoch"]
+    x = ["Centr in Det (best)", "Centr in Stoch",
+         "Distr in Stoch", "Hybrid in Stoch"]
     # Mean
-    distr_avg_det = np.mean(distr_det_results)
+    # distr_avg_det = np.mean(distr_det_results)
     distr_avg_stoch = np.mean(distr_stoch_results)
     centr_avg_det = np.mean(centr_det_results)
     centr_avg_stoch = np.mean(centr_stoch_results)
+    # hybrid_avg_det = np.mean(hybrid_det_results)
+    hybrid_avg_stoch = np.mean(hybrid_stoch_results)
     # StdErr
-    distr_se_det = np.std(distr_det_results) / np.sqrt(len(distr_det_results))
+    # distr_se_det = np.std(distr_det_results) / np.sqrt(len(distr_det_results))
     distr_se_stoch = np.std(distr_stoch_results) / \
         np.sqrt(len(distr_stoch_results))
     centr_se_det = np.std(centr_det_results) / np.sqrt(len(centr_det_results))
     centr_se_stoch = np.std(centr_stoch_results) / \
         np.sqrt(len(centr_stoch_results))
+    # hybrid_se_det = np.std(hybrid_det_results) / \
+    # np.sqrt(len(hybrid_det_results))
+    hybrid_se_stoch = np.std(hybrid_stoch_results) / \
+        np.sqrt(len(hybrid_stoch_results))
 
-    avg_tasks = [distr_avg_det, distr_avg_stoch,
-                 centr_avg_det, centr_avg_stoch]
-    error_bars = [distr_se_det, distr_se_stoch, centr_se_det, centr_se_stoch]
+    avg_tasks = [centr_avg_det, centr_avg_stoch,
+                 distr_avg_stoch, hybrid_avg_stoch,]
+    error_bars = [centr_se_det, centr_se_stoch,
+                  distr_se_stoch, hybrid_se_stoch]
 
     ax.bar(x, avg_tasks, yerr=error_bars, capsize=5,
-           color=['blue', 'lightblue', 'green', 'lightgreen'])
+           color=['blue', 'lightblue', 'red', 'darkviolet'])
 
     ax.set_ylabel('Percent Task Completion')
-    ax.set_title('Comparison of Task Completion between Algorithms')
+    title = "Task Completion for " + \
+        str(problem_size) + " Tasks," + str(num_robots) + \
+        " Robots over " + str(trials) + " Trials"
+    ax.set_title(title)
     ax.set_ybound(0.0, 1.0)
 
     plt.show()
