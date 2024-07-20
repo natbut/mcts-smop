@@ -1,3 +1,4 @@
+from copy import deepcopy
 from math import ceil
 
 import numpy as np
@@ -12,12 +13,20 @@ class Graph:
         self.works = works
         self.cost_distributions = cost_distributions
 
-    def get_stoch_cost(self, edge):
+    def sample_edge_stoch(self, edge):
         random_sample = self.cost_distributions[edge].rvs(size=5)
-        return self.works[edge[1]] + ceil(max(1, np.random.choice(random_sample)))
+        return int(max(1, np.random.choice(random_sample)))
 
-    def get_mean_cost(self, edge):
-        return self.works[edge[1]] + ceil(self.cost_distributions[edge].mean())
+    def get_edge_mean(self, edge):
+        return int(self.cost_distributions[edge].mean())
+
+    def get_stoch_cost_edgeWork(self, edge):
+        # Use for
+        random_sample = self.cost_distributions[edge].rvs(size=5)
+        return self.works[edge[1]] + int(max(1, np.random.choice(random_sample)))
+
+    def get_mean_cost_edgeWork(self, edge):
+        return self.works[edge[1]] + int(self.cost_distributions[edge].mean())
 
 
 def generate_cost_distributions(vertices, mean_range=(1, 5), c=0.05, seed=42):
@@ -80,3 +89,17 @@ def create_sop_instance(num_vertices: int,
             works[v] = np.random.randint(work_range[0], work_range[1]+1)
 
     return Graph(vertices, rewards, works, edges, cost_distributions)
+
+
+def create_dummy_graph(graph: Graph, c) -> Graph:
+    dummy_graph = deepcopy(graph)
+    # NOTE perhaps increase the difference between means?
+    for edge in dummy_graph.edges:
+        new_edge_mean = dummy_graph.sample_edge_stoch(edge)
+        # Min edge mean should be >= 0
+        new_mean_range = (new_edge_mean-1, new_edge_mean+1)
+        new_cost_dist = generate_cost_distributions([edge[0], edge[1]],
+                                                    new_mean_range,
+                                                    c)
+        dummy_graph.cost_distributions[edge] = new_cost_dist[edge]
+    return dummy_graph

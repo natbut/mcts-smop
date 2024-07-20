@@ -24,9 +24,9 @@ def computeSortedSavingsList(graph: Graph, alpha=0.5):
     for i in locations:
         for j in locations:
             if i != j and i != "vs" and i != "vg" and j != "vs" and j != "vg":
-                t_i_vg = graph.get_mean_cost((i, "vg"))
-                t_vs_j = graph.get_mean_cost(("vs", j))
-                t_i_j = graph.get_mean_cost((i, j))
+                t_i_vg = graph.get_mean_cost_edgeWork((i, "vg"))
+                t_vs_j = graph.get_mean_cost_edgeWork(("vs", j))
+                t_i_j = graph.get_mean_cost_edgeWork((i, j))
                 sij = t_i_vg + t_vs_j - t_i_j
                 ui = graph.rewards[i]
                 uj = graph.rewards[j]
@@ -63,7 +63,7 @@ def calcRouteTravelTime(route, graph: Graph):
         return None
     travel_time = 0
     for edge in route:
-        travel_time += graph.get_mean_cost(edge)
+        travel_time += graph.get_mean_cost_edgeWork(edge)
     return travel_time
 
 
@@ -388,8 +388,8 @@ def biased_insertion(solution, graph: Graph, budget, beta2=0.3):
                     # Evaluate node if addition yields valid tour
                     # print("check in BIASED INSERT")
                     if route_det_cost(test_route, graph) < budget:
-                        cost_increase = graph.get_mean_cost(
-                            (route[i-1], node)) + graph.get_mean_cost((node, route[i])) - graph.get_mean_cost((route[i-1], route[i]))
+                        cost_increase = graph.get_mean_cost_edgeWork(
+                            (route[i-1], node)) + graph.get_mean_cost_edgeWork((node, route[i])) - graph.get_mean_cost_edgeWork((route[i-1], route[i]))
                         reward = graph.rewards[node]
                         candidate_nodes.append(
                             (node, cost_increase / reward, i))
@@ -422,7 +422,11 @@ def det_reward(solution, graph: Graph, budget):
 
 
 def route_det_cost(route, graph: Graph):
-    return sum(graph.get_mean_cost((route[i], route[i+1])) for i in range(len(route)-1))
+    return sum(graph.get_mean_cost_edgeWork((route[i], route[i+1])) for i in range(len(route)-1))
+
+
+def route_stoch_cost(route, graph: Graph):
+    return sum(graph.get_stoch_cost_edgeWork((route[i], route[i+1])) for i in range(len(route)-1))
 
 
 def stoch_reward(solution, graph: Graph, budget):
@@ -436,10 +440,6 @@ def stoch_reward(solution, graph: Graph, budget):
             fail = 1
     unique_tasks_visited = set(all_tasks_successfully_visited)
     return sum(graph.rewards[task_id] for task_id in unique_tasks_visited), fail
-
-
-def route_stoch_cost(route, graph: Graph):
-    return sum(graph.get_stoch_cost((route[i], route[i+1])) for i in range(len(route)-1))
 
 
 def fast_simulation(solution, graph, budget, iterations):

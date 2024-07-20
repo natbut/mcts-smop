@@ -36,7 +36,7 @@ def state_storer(data: dict, parent_state: State, action, id):
     cost = 0
     for i in range(len(actions)-1):
         edge = (actions[i], actions[i+1])
-        cost += data["graph"].get_stoch_cost(edge)
+        cost += data["graph"].get_stoch_cost_edgeWork(edge)
     state.remaining_budget = data["budget"] - cost
     return state
 
@@ -57,8 +57,8 @@ def avail_actions(data, state: State, robot_id):
             # check if task is reachable within budget
             # back 2 because last action is vg
             last_action = state.action_seq[-2]
-            cost = graph.get_mean_cost(
-                (last_action, task)) + graph.get_mean_cost((task, data["end"]))
+            cost = graph.get_mean_cost_edgeWork(
+                (last_action, task)) + graph.get_mean_cost_edgeWork((task, data["end"]))
             if cost < state.remaining_budget:
                 choices.append(task)
     # print("Given actions", state.action_seq, " we have choices: ", choices)
@@ -70,6 +70,7 @@ def reward(data: dict, states: dict[State]):
     Create a reward function. This is the global reward given a list of  actions taken by the current robot, and every other robot states is a dictionary with keys being robot IDs, and values are the object returned by the state_storer function you provide
     """
     # Return sum of reward for each unique task visited (duplicates don't reward)
+    # TODO improve reward function to prioritize reliability alongside risk
     # TODO Check against local utility function defined in paper
     # Don't reward tours that exceed budget
     # print("REWARD CALC")
@@ -106,8 +107,8 @@ def sim_get_actions_available(data: dict, states: dict[State], rob_id: int):
     for task in graph.vertices:
         if task not in unique_tasks_allocated:
             last_action = robot_state.action_seq[-2]
-            cost = graph.get_mean_cost(
-                (last_action, task)) + graph.get_mean_cost((task, data["end"]))
+            cost = graph.get_mean_cost_edgeWork(
+                (last_action, task)) + graph.get_mean_cost_edgeWork((task, data["end"]))
             if cost < robot_state.remaining_budget:
                 reachable_unallocated_tasks.append(task)
 
@@ -122,7 +123,7 @@ def sim_select_action(data: dict, options: list, state: State):
     # NOTE Use more intelligent selection choice (See SOPCC)
     # from DecMCTS: Select next edge that does not exceed travel budget and maximizes ratio of increased reward to edge cost
     idx_max = np.argmax([data["graph"].rewards[o] /
-                        data["graph"].get_stoch_cost((state.action_seq[-2], o)) for o in options])
+                        data["graph"].get_stoch_cost_edgeWork((state.action_seq[-2], o)) for o in options])
 
     return options[idx_max]
 

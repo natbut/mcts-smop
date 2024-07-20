@@ -69,9 +69,9 @@ if __name__ == "__main__":
         all_det_visits = []
         all_stoch_visits = []
         for path in solution:
-            det_cost = sum(graph.get_mean_cost(
+            det_cost = sum(graph.get_mean_cost_edgeWork(
                 (path[i], path[i+1])) for i in range(len(path)-1))
-            stoch_cost = sum(graph.get_stoch_cost(
+            stoch_cost = sum(graph.get_stoch_cost_edgeWork(
                 (path[i], path[i+1])) for i in range(len(path)-1))
             if det_cost <= budget:
                 all_det_visits += path

@@ -42,15 +42,21 @@ class Mothership:
                 alloc_tasks += self.stored_act_dists[robot].best_action(
                 ).action_seq
 
+        # print("Allocated tasks full:", alloc_tasks)
+        # print("Completed tasks full:", self.completed_tasks)
+
         alloc_tasks = set(alloc_tasks + self.completed_tasks)
 
-        print("Allocated tasks:", self.completed_tasks)
+        # print("Reduced set:", alloc_tasks)
 
         data["graph"] = deepcopy(self.sim_data["graph"])
         for v in alloc_tasks:
             data["graph"].vertices.remove(v)
 
-        print("Planning with:", data["graph"].vertices)
+        # print("Planning with:", data["graph"].vertices)
+
+        if len(data["graph"].vertices) == 0:
+            return
 
         solution = sim_brvns(data["graph"],
                              data["budget"],
