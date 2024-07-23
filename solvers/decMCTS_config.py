@@ -18,7 +18,7 @@ class State:
         return "x:" + str(self.action_seq) + " | rem_budget:" + str(self.remaining_budget)
 
 
-def state_storer(data: dict, parent_state: State, action, id):
+def state_storer(data: dict, parent_state, action, id):
     """
     This calculates the object stored at a given node given parent node and action
     """
@@ -65,24 +65,27 @@ def avail_actions(data, state: State, robot_id):
     return choices
 
 
-def reward(data: dict, states: dict[State]):
+def local_util_reward(data: dict, states: dict[State], rob_id):
     """
     Create a reward function. This is the global reward given a list of  actions taken by the current robot, and every other robot states is a dictionary with keys being robot IDs, and values are the object returned by the state_storer function you provide
     """
     # Return sum of reward for each unique task visited (duplicates don't reward)
     # TODO improve reward function to prioritize reliability alongside risk
     # TODO Check against local utility function defined in paper
-    # Don't reward tours that exceed budget
-    # print("REWARD CALC")
+    # NOTE Don't reward tours that exceed budget
     all_tasks_visited = []
+    tasks_without_robot_i = []
     for robot in states:
         if states[robot].remaining_budget > 0:
+            if robot != rob_id:
+                tasks_without_robot_i += states[robot].action_seq
             all_tasks_visited += states[robot].action_seq
     # print("all tasks visited:", all_tasks_visited)
     unique_tasks_visited = set(all_tasks_visited)
+    unique_tasks_visited_without = set(tasks_without_robot_i)
     # print("unique tasks visited:", unique_tasks_visited)
     graph = data["graph"]
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited)
+    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) - sum(graph.rewards[task_id] for task_id in unique_tasks_visited_without)
 
 
 def sim_get_actions_available(data: dict, states: dict[State], rob_id: int):

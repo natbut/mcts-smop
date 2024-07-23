@@ -280,7 +280,7 @@ def BRVNS(initial_solution,
         rem_budget = budget - route_det_cost(route, graph)
         sol_as_states.append(State(route, rem_budget))
 
-    return sol_as_states, best_reliability
+    return sol_as_states, stoch_reward_best, best_reliability
 
 
 def shake(solution, k, k_max, graph: Graph, budget, start, end, alpha, beta):
@@ -496,20 +496,20 @@ def sim_brvns(graph: Graph,
                                               beta=0.05  # det initial solution
                                               )
 
-    final_solution, reliability = BRVNS(initial_solution,
-                                        graph,
-                                        budget,
-                                        start,
-                                        end,
-                                        alpha,
-                                        beta,
-                                        k_initial,
-                                        k_max,
-                                        t_max,
-                                        exploratory_mcs_iters,
-                                        intensive_mcs_iters
-                                        )
-    return final_solution  # , reliability
+    final_solution, reward, reliability = BRVNS(initial_solution,
+                                                graph,
+                                                budget,
+                                                start,
+                                                end,
+                                                alpha,
+                                                beta,
+                                                k_initial,
+                                                k_max,
+                                                t_max,
+                                                exploratory_mcs_iters,
+                                                intensive_mcs_iters
+                                                )
+    return final_solution, reward, reliability
 
 
 if __name__ == "__main__":

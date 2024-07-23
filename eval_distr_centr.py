@@ -113,7 +113,7 @@ if __name__ == "__main__":
                 trees = {}
                 for r in range(num_robots):
                     trees[r] = Tree(data[r],
-                                    reward,
+                                    local_util_reward,
                                     avail_actions,
                                     state_storer,
                                     sim_select_action,

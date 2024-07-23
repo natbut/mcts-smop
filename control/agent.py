@@ -1,4 +1,5 @@
 import math
+import random
 from copy import deepcopy
 
 import numpy as np
@@ -68,10 +69,12 @@ class Agent:
 
     # === SCHEDULING FUNCTIONS ===
 
-    def optimize_schedule(self, comms_mgr: CommsManager_Basic, agent_list):
+    def optimize_schedule(self, comms_mgr: CommsManager_Basic, agent_list, sim_config):
+
         # No optimization if returning home or at home
         if self.sim_data["start"] == self.sim_data["end"]:
             self.schedule = []
+            self.event = False
             return
 
         # Load search tree
@@ -82,7 +85,7 @@ class Agent:
         data["budget"] = self.sim_data["budget"]
 
         tree = Tree(data,
-                    reward,
+                    local_util_reward,
                     avail_actions,
                     state_storer,
                     sim_select_action,
@@ -97,70 +100,97 @@ class Agent:
             # Alg1. GROW TREE & UPDATE DISTRIBUTION
             tree.grow()
             # NOTE removed comms stuff here because unrealistic. Handling elsewhere.
+            # TODO do testing with comms exchange added back in...
+            for target in agent_list:
+                if target.id != self.id:
+                    self.send_message(comms_mgr,
+                                      target.id,
+                                      ("initiate", tree.my_act_dist))
 
         # Evaluate candidate solutions against current stored elites, reduce to subset of size n_comms, select best act sequence from elites as new schedule
-        candidate_states = tree.my_act_dist.X
-        self.update_my_best_action_dist(candidate_states)
+        # NOTE only need to do this type of solution merge if hybrid
+        if "Hybrid" in sim_config:
+            candidate_states = tree.my_act_dist
+            self.update_my_best_action_dist(candidate_states)
+            # Send updated distro to M for use in scheduling other robots
+            self.send_message(comms_mgr, -1, ("Update", self.my_action_dist))
+        else:
+            self.my_action_dist = tree.my_act_dist
+
+        self.schedule = self.my_action_dist.best_action().action_seq[:]
+
+        # Remove event flag once schedule is updated
+        self.event = False
 
         # Send new action dist to other agents
         for target in agent_list:
             if target.id != self.id:
                 self.send_message(comms_mgr,
                                   target.id,
-                                  self.my_action_dist)
+                                  ("Update", self.my_action_dist))
 
     def get_valid_schedule_options(self, new_states: list[State]):
         # Trim down to only valid schedules (new states plus valid stored)
+
         states = new_states
         # Add stored states
         if self.my_action_dist != None:
             # Add any currently-stored applicable schedules
             for state in self.my_action_dist.X:
-                # TODO? consider allowing any states where action[1] appears in the schedule, then trimming the front end of the state's schedule down to start with action[1]
-                if self.action[1] == state.action_seq[0]:
+                # Allow any states where action[1] appears in the schedule, then trim the front end of the state's schedule to start with action[1]
+                if self.action[1] in state.action_seq:
+                    # NOTE trim to self.action[1]
+                    v = state.action_seq[0]
+                    while v != self.action[1]:
+                        state.action_seq.pop(0)
+                        v = state.action_seq[0]
+                    # NOTE budgets updated here
+                    state.remaining_budget = self.sim_data["budget"]
                     states.append(state)
         return states
 
     def update_my_best_action_dist(self,
-                                   new_states: list[State],
+                                   new_act_dist: ActionDistribution,
                                    rel_thresh=0.99,
-                                   perf_thresh=0.5,
+                                   perf_thresh=0.9,
                                    sim_iters=10):
         # Automatically use schedule if currently have no schedule
         if self.action[1] == "Init":
-            # TODO this might struggle with purely distributed as it always uses 1st state only
-            self.my_action_dist = ActionDistribution([new_states[0]], [1])
+            # TODO? this might struggle in purely distributed as it always uses 1st state only
+            self.my_action_dist = new_act_dist
             self.schedule = self.my_action_dist.best_action().action_seq[:]
             self.event = False
             # initial reward
             self.initial_alloc_reward = sum(
-                self.sim_data["graph"].rewards[v] for v in self.schedule)  # TODO
-            return
-        # TODO think about assigning current remaining budget to any/all states being saved in elites
-
-        # TODO Naive approach to safe return
-        complete_tasks_reward = sum(
-            self.sim_data["graph"].rewards[v] for v in self.completed_tasks)
-        if complete_tasks_reward/self.initial_alloc_reward > perf_thresh:
-            return_home_state = State(
-                [self.schedule[0], self.sim_data["end"]], self.sim_data["budget"])
-            self.my_action_dist = ActionDistribution([return_home_state], [1])
-            self.schedule = self.my_action_dist.best_action().action_seq[:]
-            self.event = False
+                self.sim_data["graph"].rewards[v] for v in self.schedule)
             return
 
-        states = self.get_valid_schedule_options(new_states)
+        # NOTE consider a factor related to self.completed tasks that encourages early return with increasing numbers of completed tasks
+        # TODO Naive approach to safe return with perf thresh filter
+        # complete_tasks_reward = sum(
+        #     self.sim_data["graph"].rewards[v] for v in self.completed_tasks)
+        # if complete_tasks_reward/self.initial_alloc_reward > perf_thresh:
+        #     return_home_state = State(
+        #         [self.schedule[0], self.sim_data["end"]], self.sim_data["budget"])
+        #     self.my_action_dist = ActionDistribution([return_home_state], [1])
+        #     self.schedule = self.my_action_dist.best_action().action_seq[:]
+        #     self.event = False
+        #     return
+
+        # print("New states input:", new_act_dist.X)
+        states = self.get_valid_schedule_options(new_act_dist.X)
 
         # TODO create separate function for this (probably once we incorporate safe returns)
         # Evaluate reward for each reliable state schedule
         rewards = []
+        rels = []
         usable_states = []
         for state in states:
             route = state.action_seq
             # Ensure 1 instance per route is evaluated
             # TODO try doing this filter earlier
             new_route = True
-            for test in states:
+            for test in usable_states:
                 if test.action_seq == route:
                     new_route = False
             if new_route:
@@ -169,33 +199,49 @@ class Agent:
                                   for i in range(len(route)-1)]
                 rew, rel = fast_simulation(
                     route_as_edges, self.sim_data["graph"], self.sim_data["budget"], sim_iters)
+                state.remaining_budget = self.sim_data["budget"]
                 # NOTE filter routes to only those above a reliability threshold
                 if rel >= rel_thresh:
                     rewards.append(rew)
+                    rels.append(rel)
                     usable_states.append(state)
 
         print("Agent", self.id, "usable states:", len(usable_states))
 
         # NOTE attempt to GO HOME if no usable schedules
-        # NOTE consider a factor related to self.completed tasks that encourages early return with increasing numbers of completed tasks
         if len(usable_states) == 0:
             usable_states.append(
                 State([self.schedule[0], self.sim_data["end"]], self.sim_data["budget"]))
             rewards.append(1.0)
+            rels.append(1.0)
 
         # Reduce to only top comms_n states (or fewer)
-        # TODO normalize rewards (0,1), sort by rew_norm + rel values
-        pairs = list(zip(rewards, usable_states))
+        # normalize rewards (0,1), sort by rew_norm + rel values
+        rewards = np.array(self.normalize(rewards))
+        rels = np.array(rels)
+        scores = rewards + rels
+        pairs = list(zip(scores, usable_states))
         sorted_pairs = sorted(pairs, key=lambda pair: pair[0], reverse=True)
         rewards, states = zip(*sorted_pairs)
         top_states = states[:self.solver_params["comm_n"]]
-        top_rewards = rewards[:self.solver_params["comm_n"]]
+        top_scores = scores[:self.solver_params["comm_n"]]
         # Update action distribution
-        self.my_action_dist = ActionDistribution(top_states, top_rewards)
-        self.schedule = self.my_action_dist.best_action().action_seq[:]
+        # NOTE we are now using rew+rel as score for determining q vals in hybrid approach
+        self.my_action_dist = ActionDistribution(top_states, top_scores)
         self.event = False
 
         print("Agent", self.id, ": Updated distro:\n", self.my_action_dist)
+
+    def normalize(self, values):
+        min_val = min(values)
+        max_val = max(values)
+
+        # Avoid division by zero if all values are the same
+        if max_val == min_val:
+            # Arbitrary choice to set all values to 0.5
+            return [0.5 for _ in values]
+
+        return [(val - min_val) / (max_val - min_val) for val in values]
 
     # === COMMS FUNCTIONS ===
 
@@ -209,25 +255,32 @@ class Agent:
         msg = Message(self.id, target_id, content)
         comms_mgr.add_message_for_passing(msg)
 
-    def receive_message(self, msg: Message):
+    def receive_message(self, comms_mgr: CommsManager_Basic, msg: Message):
         """Receive a message"""
         # print("\nReceived message from", msg.sender_id, " Content:", msg.content)
         if msg.sender_id == -1:  # Message from mothership
             if self.id == msg.content[0]:
-                print("!!! Agent", self.id, " Received new schedule from M:",
-                      msg.content[1].action_seq)
+                print("!!! Agent", self.id, " Received new schedules from M:")
                 print("with current action:", self.action,
                       " | and Schedule:", self.schedule)
                 # Receiving own schedule
                 # Compare schedule to stored elites, update action distro
-                self.update_my_best_action_dist([msg.content[1]])
+                self.update_my_best_action_dist(msg.content[1])
             else:
                 # Receiving other robot's schedule
                 # TODO? Add this to stored action distros for other agents (rather than simply replacing them)
-                other_act_dist = ActionDistribution([msg.content[1]], [1])
-                self.stored_act_dists[msg.content[0]] = other_act_dist
+                self.stored_act_dists[msg.content[0]] = msg.content[1]
         else:
-            self.stored_act_dists[msg.sender_id] = msg.content
+            if msg.content[0] == "Update":
+                self.stored_act_dists[msg.sender_id] = msg.content[1]
+            # Return copy of current act dis if sending agent has initiated comms
+            if msg.content[0] == "initiate":
+                if self.my_action_dist != None:
+                    self.send_message(comms_mgr, msg.sender_id,
+                                      ("respond", self.my_action_dist))
+            if msg.content[0] == "Edge":
+                self.sim_data["graph"].cost_distributions[msg.content[1]
+                                                          ] = msg.content[2]
 
     # === REALISTIC SIM COMPONENTS ===
 
@@ -412,6 +465,26 @@ class Agent:
 
     # def have_energy_remaining(self) -> bool:
     #     return self.energy > 0
+
+    def edge_discover(self, true_graph, comms_mgr, agent_list, sim_config, discovery_prob):
+        # Active agents may discover random edges with probability discovery_prob
+        if self.action[0] != self.IDLE:
+            sample = np.random.random()
+            # Prob of returning early
+            if sample <= discovery_prob:
+                return
+            # Sample random edge from true graph
+            edge = random.choice(true_graph.edges)
+            self.sim_data["graph"].cost_distributions[edge] = true_graph.cost_distributions[edge]
+
+            content = ("Edge", edge, true_graph.cost_distributions[edge])
+
+            for target in agent_list:
+                if target.id != self.id:
+                    self.send_message(comms_mgr, target.id, content)
+
+            if "Hybrid" in sim_config:
+                self.send_message(comms_mgr, -1, content)
 
     def reduce_energy_basic(self):
         if self.action[0] != self.IDLE:

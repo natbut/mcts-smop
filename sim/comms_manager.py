@@ -93,7 +93,7 @@ class CommsManager:
             # Else receive message
             else:
                 # TODO - maybe insert some probability that message is lost here
-                self.agent_dict[msg.receiver_id].receive_message(msg)
+                self.agent_dict[msg.receiver_id].receive_message(self, msg)
 
                 # Remove received message
                 self.active_msgs.remove(msg)
@@ -104,11 +104,11 @@ class CommsManager:
 
 class CommsManager_Basic:
 
-    def __init__(self, agent_list) -> None:
+    def __init__(self, agent_list, comms_succ_prob) -> None:
         self.agent_dict = {}
         for a in agent_list:
             self.agent_dict[a.id] = a
-
+        self.success_prob = comms_succ_prob
         self.agent_comms_dict = {}
 
         # list of "active messages" being passed by manager
@@ -122,21 +122,24 @@ class CommsManager_Basic:
         msg.set_delay(0)
         # Add to active messages
         self.active_msgs.append(msg)
-        # TODO this is for inst. delivery (may delete later)
+        # TODO this is for inst. delivery (delete later, probably)
         while self.active_msgs:
             self.step()
 
     def step(self):
         # function to manage message passing with each time step (considering delays, packet drop)
+        # NOTE The pop line here is added to address the inst delivery above. Can likely refactor this code if no longer doing inst delivery
         # Update message passing
-        for msg in self.active_msgs:
+        for i, msg in enumerate(self.active_msgs):
             # Reduce delay if message still passing
             if msg.delay > 0:
                 msg.set_delay(msg.delay - 1)
-            # Else receive message
             else:
-                # NOTE maybe insert some probability that message is lost here
-                self.agent_dict[msg.receiver_id].receive_message(msg)
-
-                # Remove received message
-                self.active_msgs.remove(msg)
+                # Else receive message
+                arrive_msg = self.active_msgs.pop(i)
+                # probability that message is lost
+                samp = np.random.random()
+                if samp <= self.success_prob:
+                    # Remove & send received message
+                    self.agent_dict[msg.receiver_id].receive_message(
+                        self, arrive_msg)

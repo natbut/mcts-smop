@@ -77,8 +77,6 @@ def create_sop_instance(num_vertices: int,
             rewards[v] = reward_range[0]
         else:
             rewards[v] = np.random.randint(reward_range[0], reward_range[1]+1)
-    rewards["vs"] = 0
-    rewards["vg"] = 0
 
     # Generate work costs for each node
     works = {}
@@ -103,3 +101,16 @@ def create_dummy_graph(graph: Graph, c) -> Graph:
                                                     c)
         dummy_graph.cost_distributions[edge] = new_cost_dist[edge]
     return dummy_graph
+
+
+def create_true_graph(stoch_graph: Graph, c=0.05) -> Graph:
+    # Use very low c for deterministic
+    true_graph = deepcopy(stoch_graph)
+
+    for edge in true_graph.edges:
+        cost_sample = true_graph.sample_edge_stoch(edge)
+        stddev = (c * cost_sample)**0.5
+        true_graph.cost_distributions[edge] = norm(
+            loc=cost_sample, scale=stddev)
+
+    return true_graph

@@ -284,7 +284,7 @@ class Tree:
 
             # calculate the reward at the end of simulation
             # TODO incorporate failure here for sopcc
-            rew = self.reward(self.data, system_state)
+            rew = self.reward(self.data, system_state, self.id)
             cum_reward += rew
             # if best reward so far, store the rollout in the new node
             if rew > best_reward:

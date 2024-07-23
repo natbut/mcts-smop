@@ -1,6 +1,8 @@
 import random
 from copy import deepcopy
 
+import numpy as np
+
 from control.agent import Agent
 from sim.comms_manager import CommsManager_Basic, Message
 from solvers.decMCTS_config import State
@@ -19,11 +21,9 @@ class Mothership:
         self.queued_robots = []
 
     # Scheduling functions
-    def solve_new_tour_single(self, comms_mgr: CommsManager_Basic, agent: Agent, agent_list: list[Agent]):
+    def solve_new_tour_single(self, comms_mgr: CommsManager_Basic, agent: Agent, agent_list: list[Agent], act_samples=5, t_limit=100):
         if len(agent.schedule) <= 1:
             return
-
-        # TODO: limit comms
 
         # Set up solver params
         data = self.solver_params
@@ -36,52 +36,80 @@ class Mothership:
         # This encompasses tasks that M has been told are complete PLUS those that M believes to be scheduled by other agents
         self.completed_tasks = list(set(
             self.completed_tasks + agent.completed_tasks))
-        alloc_tasks = []
-        for robot in self.stored_act_dists:
-            if [robot] != agent.id:
-                alloc_tasks += self.stored_act_dists[robot].best_action(
-                ).action_seq
 
-        # print("Allocated tasks full:", alloc_tasks)
-        # print("Completed tasks full:", self.completed_tasks)
+        # Planning with multiple samples from stored act dists to get an action_dist of best solutions
+        sols = []
+        rews = []
+        rels = []
+        for _ in range(act_samples):
+            alloc_tasks = []
+            for robot in self.stored_act_dists:
+                if [robot] != agent.id:
+                    alloc_tasks += self.stored_act_dists[robot].random_action(
+                    ).action_seq
 
-        alloc_tasks = set(alloc_tasks + self.completed_tasks)
+            # print("Allocated tasks full:", alloc_tasks)
+            # print("Completed tasks full:", self.completed_tasks)
 
-        # print("Reduced set:", alloc_tasks)
+            alloc_tasks = set(alloc_tasks + self.completed_tasks)
 
-        data["graph"] = deepcopy(self.sim_data["graph"])
-        for v in alloc_tasks:
-            data["graph"].vertices.remove(v)
+            # print("Reduced set:", alloc_tasks)
 
-        # print("Planning with:", data["graph"].vertices)
+            data["graph"] = deepcopy(self.sim_data["graph"])
+            for v in alloc_tasks:
+                data["graph"].vertices.remove(v)
 
-        if len(data["graph"].vertices) == 0:
-            return
+            # print("Planning with:", data["graph"].vertices)
 
-        solution = sim_brvns(data["graph"],
-                             data["budget"],
-                             data["num_robots"],
-                             data["start"],
-                             data["end"],
-                             data["alpha"],
-                             data["beta"],
-                             data["k_initial"],
-                             data["k_max"],
-                             data["t_max"],
-                             data["explore_iters"],
-                             data["intense_iters"]
-                             )
+            if len(data["graph"].vertices) == 0:
+                return
 
-        # Send solution to all robots
+            # TODO try shorter solver time during runtime b/c multiple samples
+            solution, rew, rel = sim_brvns(data["graph"],
+                                           data["budget"],
+                                           data["num_robots"],
+                                           data["start"],
+                                           data["end"],
+                                           data["alpha"],
+                                           data["beta"],
+                                           data["k_initial"],
+                                           data["k_max"],
+                                           data["t_max"],
+                                           data["explore_iters"],
+                                           data["intense_iters"],
+                                           )
+            sols.append(solution[0])
+            rews.append(rew)
+            rels.append(rel)
+
+        # Update action distribution
+        # NOTE we are now using rew+rel as score for determining q vals in hybrid approach - these are also re-evaluated when this message is received by agent using agent's local graph
+        rews = np.array(self.normalize(rews))
+        rels = np.array(rels)
+        scores = rews + rels
+        action_dist = ActionDistribution(sols, scores)
+
+        # Send action_dist to all robots
         for target in agent_list:
             self.send_message(comms_mgr,
                               target.id,
-                              (agent.id, solution[0]))
+                              (agent.id, action_dist))
 
         # NOTE may need to enforce message sending here while not doing threading
         # NOTE though we don't have confirmation that an action_dist was delivered, we save results anyways here to influence scheduling for other agents
-        self.stored_act_dists[agent.id] = ActionDistribution(
-            [solution[0]], [1])
+        self.stored_act_dists[agent.id] = action_dist  # ActionDistribution(
+        # [solution[0]], [1])
+
+    def normalize(self, values):
+        min_val = min(values)
+        max_val = max(values)
+
+        # Avoid division by zero if all values are the same
+        if max_val == min_val:
+            # Arbitrary choice to set all values to 0.5
+            return [0.5 for _ in values]
+
+        return [(val - min_val) / (max_val - min_val) for val in values]
 
     def solve_STOP_schedules(self, comms_mgr: CommsManager_Basic, agent_list: list[Agent]):
         # Get an initial solution
@@ -92,34 +120,36 @@ class Mothership:
         data["end"] = self.sim_data["end"]
 
         # returns list of States
-        solution = sim_brvns(data["graph"],
-                             data["budget"],
-                             data["num_robots"],
-                             data["start"],
-                             data["end"],
-                             data["alpha"],
-                             data["beta"],
-                             data["k_initial"],
-                             data["k_max"],
-                             data["t_max"],
-                             data["explore_iters"],
-                             data["intense_iters"]
-                             )
+        solution, rew, rel = sim_brvns(data["graph"],
+                                       data["budget"],
+                                       data["num_robots"],
+                                       data["start"],
+                                       data["end"],
+                                       data["alpha"],
+                                       data["beta"],
+                                       data["k_initial"],
+                                       data["k_max"],
+                                       data["t_max"],
+                                       data["explore_iters"],
+                                       data["intense_iters"]
+                                       )
 
         # Pair solution with robot ids
-        paired_solution = {}
+        # paired_solution = {}
         for i, state in enumerate(solution):
-            paired_solution[i] = deepcopy(state)
-            self.stored_act_dists[i] = ActionDistribution([state], [1])
+            # paired_solution[i] = deepcopy(state)
+            self.stored_act_dists[i] = ActionDistribution(
+                [deepcopy(state)], [1])
         for i in range(len(solution), self.solver_params["num_robots"]):
             state = random.choice(solution)
-            paired_solution[i] = deepcopy(state)
-            self.stored_act_dists[i] = ActionDistribution([state], [1])
+            # paired_solution[i] = deepcopy(state)
+            self.stored_act_dists[i] = ActionDistribution(
+                [deepcopy(state)], [1])
 
         # Send agent their own plans AND other agents' plans
         for target in agent_list:
             for a in agent_list:
-                content = paired_solution[a.id]
+                content = self.stored_act_dists[a.id]
                 self.send_message(comms_mgr,
                                   target.id,
                                   (a.id, content))
@@ -135,9 +165,13 @@ class Mothership:
         msg = Message(self.id, target_id, content)
         comms_mgr.add_message_for_passing(msg)
 
-    def receive_message(self, msg: Message):
+    def receive_message(self, comms_mgr, msg: Message):
         # receive a message
-        self.stored_act_dists[msg.sender_id] = msg.content
+        if msg.content[0] == "Update":
+            self.stored_act_dists[msg.sender_id] = msg.content[1]
+        if msg.content[0] == "Edge":
+            self.sim_data["graph"].cost_distributions[msg.content[1]
+                                                      ] = msg.content[2]
 
 
 def generate_mothership_with_data(solver_params, sim_data) -> Mothership:
