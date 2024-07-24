@@ -4,24 +4,15 @@ from copy import deepcopy
 import numpy as np
 
 from control.agent import Agent
-from sim.comms_manager import CommsManager_Basic, Message
-from solvers.decMCTS_config import State
+from sim.comms_manager import CommsManager_Basic
 from solvers.my_DecMCTS import ActionDistribution
 from solvers.sim_brvns import sim_brvns
 
 
-class Mothership:
-
-    def __init__(self, id, solver_params, sim_data) -> None:
-        self.id = id
-        self.solver_params = solver_params
-        self.sim_data = sim_data
-        self.stored_act_dists = {}
-        self.completed_tasks = []
-        self.queued_robots = []
+class Mothership(Agent):
 
     # Scheduling functions
-    def solve_new_tour_single(self, comms_mgr: CommsManager_Basic, agent: Agent, agent_list: list[Agent], act_samples=5, t_limit=100):
+    def solve_new_single_schedule(self, comms_mgr: CommsManager_Basic, agent: Agent, agent_list: list[Agent], act_samples=5, t_limit=100):
         if len(agent.schedule) <= 1:
             return
 
@@ -100,18 +91,7 @@ class Mothership:
         self.stored_act_dists[agent.id] = action_dist  # ActionDistribution(
         # [solution[0]], [1])
 
-    def normalize(self, values):
-        min_val = min(values)
-        max_val = max(values)
-
-        # Avoid division by zero if all values are the same
-        if max_val == min_val:
-            # Arbitrary choice to set all values to 0.5
-            return [0.5 for _ in values]
-
-        return [(val - min_val) / (max_val - min_val) for val in values]
-
-    def solve_STOP_schedules(self, comms_mgr: CommsManager_Basic, agent_list: list[Agent]):
+    def solve_team_schedules(self, comms_mgr: CommsManager_Basic, agent_list: list[Agent]):
         # Get an initial solution
         data = self.solver_params
         data["graph"] = self.sim_data["graph"]
@@ -120,19 +100,19 @@ class Mothership:
         data["end"] = self.sim_data["end"]
 
         # returns list of States
-        solution, rew, rel = sim_brvns(data["graph"],
-                                       data["budget"],
-                                       data["num_robots"],
-                                       data["start"],
-                                       data["end"],
-                                       data["alpha"],
-                                       data["beta"],
-                                       data["k_initial"],
-                                       data["k_max"],
-                                       data["t_max"],
-                                       data["explore_iters"],
-                                       data["intense_iters"]
-                                       )
+        solution, _, _ = sim_brvns(data["graph"],
+                                   data["budget"],
+                                   data["num_robots"],
+                                   data["start"],
+                                   data["end"],
+                                   data["alpha"],
+                                   data["beta"],
+                                   data["k_initial"],
+                                   data["k_max"],
+                                   data["t_max"],
+                                   data["explore_iters"],
+                                   data["intense_iters"]
+                                   )
 
         # Pair solution with robot ids
         # paired_solution = {}
@@ -154,31 +134,12 @@ class Mothership:
                                   target.id,
                                   (a.id, content))
 
-    # === COMMS FUNCTIONS ===
 
-    def update_reachable_neighbors(self, comms_mgr: CommsManager_Basic):
-        self.neighbors_status = comms_mgr.agent_comms_dict[self.id]
-
-    def send_message(self, comms_mgr: CommsManager_Basic, target_id: int, content=None):
-        # create a message & send to neighbor via comms manager
-        # TODO add consideration for available neighbors
-        msg = Message(self.id, target_id, content)
-        comms_mgr.add_message_for_passing(msg)
-
-    def receive_message(self, comms_mgr, msg: Message):
-        # receive a message
-        if msg.content[0] == "Update":
-            self.stored_act_dists[msg.sender_id] = msg.content[1]
-        if msg.content[0] == "Edge":
-            self.sim_data["graph"].cost_distributions[msg.content[1]
-                                                      ] = msg.content[2]
-
-
-def generate_mothership_with_data(solver_params, sim_data) -> Mothership:
+def generate_mothership_with_data(id, solver_params, sim_data) -> Mothership:
     """
     Create new Mothership
     """
-    m = Mothership(-1,
+    m = Mothership(id,
                    solver_params=deepcopy(solver_params),
                    sim_data=deepcopy(sim_data)
                    )

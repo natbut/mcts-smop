@@ -5,8 +5,8 @@ from copy import deepcopy
 import numpy as np
 from scipy.stats import geom
 
-from solvers.decMCTS_config import State
-from utils.graphing import Graph, create_sop_instance
+from solvers.graphing import Graph, create_sop_instance
+from solvers.masop_solver_config import *
 
 # === FUNCTIONS FOR BR CONSTRUCTIVE HEURISTIC ===
 
@@ -75,7 +75,7 @@ def validateMergeDrivingConstraints(travelTimeNewRoute, budget):
 
 def updateSolution(newRoute, iRoute, jRoute, solution):
     solution.remove(iRoute)
-    try:  # TODO
+    try:  # TODO address this failure
         solution.remove(jRoute)
     except:
         print("Unable to remove start", iRoute,
@@ -264,7 +264,6 @@ def BRVNS(initial_solution,
                 break
 
     # Phase 2 processing
-    # TODO? return some set of "elites" as an initial action distro
     best_reliability = 0
     for sol in elite_solutions:
         stoch_reward_sol, reliability_sol = intensive_simulation(sol,
@@ -412,63 +411,6 @@ def biased_insertion(solution, graph: Graph, budget, beta2=0.3):
     return solution
 
 
-def det_reward(solution, graph: Graph, budget):
-    all_tasks_visited = []
-    for route in solution:
-        if route_det_cost(route, graph) < budget:
-            all_tasks_visited += route
-    unique_tasks_visited = set(all_tasks_visited)
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited)
-
-
-def route_det_cost(route, graph: Graph):
-    return sum(graph.get_mean_cost_edgeWork((route[i], route[i+1])) for i in range(len(route)-1))
-
-
-def route_stoch_cost(route, graph: Graph):
-    return sum(graph.get_stoch_cost_edgeWork((route[i], route[i+1])) for i in range(len(route)-1))
-
-
-def stoch_reward(solution, graph: Graph, budget):
-    all_tasks_successfully_visited = []
-    fail = 0
-    for route in solution:
-        # Only apply tasks if route is a success
-        if route_stoch_cost(route, graph) < budget:
-            all_tasks_successfully_visited += route
-        else:
-            fail = 1
-    unique_tasks_visited = set(all_tasks_successfully_visited)
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited), fail
-
-
-def fast_simulation(solution, graph, budget, iterations):
-    """
-    Get reward through MCS approach. Return average reward and reliability (percent success)
-    """
-    rewards = []
-    fails = 0
-    for _ in range(iterations):
-        rew, fail = stoch_reward(solution, graph, budget)
-        rewards.append(rew)
-        fails += fail
-    return sum(rew for rew in rewards) / iterations, (iterations - fails) / iterations
-
-
-def intensive_simulation(elite_solutions, graph, budget, iterations):
-    """
-    Get reward through MCS approach. Return average reward and reliability (percent success)
-    """
-    # NOTE Same as fast simulation for now
-    rewards = []
-    fails = 0
-    for _ in range(iterations):
-        rew, fail = stoch_reward(elite_solutions, graph, budget)
-        rewards.append(rew)
-        fails += fail
-    return sum(rew for rew in rewards) / iterations, (iterations - fails) / iterations
-
-
 def prob_of_updating(newSol_profit, baseSol_profit, T):
     return math.exp((newSol_profit-baseSol_profit)/T)
 
@@ -537,8 +479,6 @@ if __name__ == "__main__":
 
     num_robots = 3
     budget = 20
-
-    # TODO: Consider using a data dict
 
     sim_brvns(graph,
               budget,

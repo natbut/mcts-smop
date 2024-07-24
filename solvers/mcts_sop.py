@@ -7,7 +7,7 @@ import random
 
 import numpy as np
 
-from utils.graphing import Graph
+from solvers.graphing import Graph
 
 
 class Node:

@@ -4,32 +4,14 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 import numpy as np
 
-from control.agent import Agent, generate_agents_with_data
 from control.mothership import generate_mothership_with_data
+from control.passenger import generate_passengers_with_data
 from sim.comms_manager import CommsManager_Basic
-from utils.graphing import *
+from solvers.graphing import *
+from solvers.masop_solver_config import (calculate_global_potential_reward,
+                                         calculate_global_reward)
 
-
-def calculate_global_potential_reward(graph: Graph, agent_list: list[Agent]):
-    # Return sum of reward for each unique task visited (duplicates don't reward)
-    all_tasks_visited = []
-    for a in agent_list:
-        all_tasks_visited += a.completed_tasks
-    unique_tasks_visited = set(all_tasks_visited)
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) / len(graph.vertices)
-
-
-def calculate_global_reward(graph: Graph, agent_list: list[Agent]):
-    # Return sum of reward for each unique task visited (duplicates don't reward)
-    all_tasks_visited = []
-    for a in agent_list:
-        if not a.dead:
-            all_tasks_visited += a.completed_tasks
-    unique_tasks_visited = set(all_tasks_visited)
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) / len(graph.vertices)
-
-
- # Define framework for doing DecMCTS with multiple agents on generic graph
+# Define framework for doing DecMCTS with multiple agents on generic graph
 if __name__ == "__main__":
 
     print("Initialize Simulation")
@@ -45,6 +27,7 @@ if __name__ == "__main__":
     velocity = 1
     start = "vs"
     end = "vg"
+    m_id = -1
     comms_succ_prob = 1.00  # % successful messages
     # % chance agent has at each time step for discovering some random edge
     edge_discovery_prob = 1.00
@@ -115,7 +98,8 @@ if __name__ == "__main__":
                          "end": end,
                          "budget": budget,
                          "velocity": velocity,
-                         "basic": True
+                         "basic": True,
+                         "m_id": m_id
                          }
 
         sim_data = {"graph": deepcopy(planning_graph),
@@ -123,7 +107,8 @@ if __name__ == "__main__":
                     "end": end,
                     "budget": budget,
                     "velocity": velocity,
-                    "basic": True
+                    "basic": True,
+                    "m_id": m_id
                     }
         dec_mcts_data = {"num_robots": num_robots,
                          "fail_prob": failure_probability,
@@ -145,29 +130,31 @@ if __name__ == "__main__":
             # Run simulation (planning, etc.)
 
             # Create agents
-            agent_list = generate_agents_with_data(dec_mcts_data, sim_data)
+            pssngr_list = generate_passengers_with_data(
+                dec_mcts_data, sim_data)
 
             # Create comms framework (TBD - may be ROS)
             # TODO set up comms failures
-            comms_mgr = CommsManager_Basic(agent_list, comms_succ_prob)
+            comms_mgr = CommsManager_Basic(pssngr_list, comms_succ_prob)
 
-            # == If Centralized, Generate Plan & Load on Agents
+            # == If Centralized, Generate Plan & Load on Passengers
             if "Cent" in sim_config or "Hybrid" in sim_config:
                 # Plan on mothership
                 print("Solving schedules...")
                 comms_mgr.success_prob = 1.0
                 if "Best" in sim_config:
                     # For baseline, plan over true graph
-                    best_mothership = generate_mothership_with_data(
-                        sim_brvns_data, best_sim_data)
-                    comms_mgr.agent_dict[-1] = best_mothership
-                    best_mothership.solve_STOP_schedules(comms_mgr, agent_list)
+                    best_mother = generate_mothership_with_data(m_id,
+                                                                sim_brvns_data,
+                                                                best_sim_data)
+                    comms_mgr.agent_dict[-1] = best_mother
+                    best_mother.solve_team_schedules(comms_mgr, pssngr_list)
                 else:
                     # For other testing, plan over planning graph
-                    mothership = generate_mothership_with_data(
-                        sim_brvns_data, sim_data)
+                    mothership = generate_mothership_with_data(m_id,
+                                                               sim_brvns_data, sim_data)
                     comms_mgr.agent_dict[-1] = mothership
-                    mothership.solve_STOP_schedules(comms_mgr, agent_list)
+                    mothership.solve_team_schedules(comms_mgr, pssngr_list)
                 comms_mgr.success_prob = comms_succ_prob
 
             # Run Sim
@@ -176,28 +163,28 @@ if __name__ == "__main__":
             i = 0
             while running:
                 print("== TIME STEP:", i)
-                for a in agent_list:
-                    print("= Agent", a.id)
+                for p in pssngr_list:
+                    print("= Passenger", p.id)
                     # Each time action is complete, do rescheduling (if distr)
-                    if a.event and ("Dist" in sim_config or "Hybrid" in sim_config) and not a.finished:
+                    if p.event and ("Dist" in sim_config or "Hybrid" in sim_config) and not p.finished:
                         if "Hybrid2" in sim_config:
                             # Solve for centralized action update
                             print("Solving hybrid schedule...")
-                            mothership.solve_new_tour_single(comms_mgr,
-                                                             a,
-                                                             agent_list,
-                                                             act_samples=1,
-                                                             t_limit=30
-                                                             )
+                            mothership.solve_new_single_schedule(comms_mgr,
+                                                                 p,
+                                                                 pssngr_list,
+                                                                 act_samples=1,
+                                                                 t_limit=30
+                                                                 )
                         # Solve for new action distro
                         # If hybrid, will consider mothership-provided solutions
-                        a.optimize_schedule(comms_mgr, agent_list, sim_config)
+                        p.optimize_schedule(comms_mgr, pssngr_list, sim_config)
 
                     # Update current action
-                    a.action_update(true_graph, sim_config)
-                    a.reduce_energy_basic()  # only if not idle
+                    p.action_update(true_graph, sim_config)
+                    p.reduce_energy_basic()  # only if not idle
                     # only if not idle
-                    a.edge_discover(true_graph, comms_mgr, agent_list,
+                    p.edge_discover(true_graph, comms_mgr, pssngr_list,
                                     sim_config, edge_discovery_prob)
 
                 # Update message passing, also update comms graph
@@ -205,8 +192,8 @@ if __name__ == "__main__":
 
                 # Check stopping criteria
                 running = False
-                for a in agent_list:
-                    if not (a.dead or a.finished):
+                for p in pssngr_list:
+                    if not (p.dead or p.finished):
                         running = True
 
                 i += 1
@@ -215,10 +202,10 @@ if __name__ == "__main__":
             print("Done")
 
             # Store results
-            reward = calculate_global_reward(true_graph, agent_list)
+            reward = calculate_global_reward(true_graph, pssngr_list)
             potent = calculate_global_potential_reward(
-                true_graph, agent_list)
-            percentDead = sum(a.dead for a in agent_list) / num_robots
+                true_graph, pssngr_list)
+            percentDead = sum(p.dead for p in pssngr_list) / num_robots
             # if sim_config == "Dist | Det":
             #     distr_det_results.append(reward)
             #     distr_det_percentDead.append(

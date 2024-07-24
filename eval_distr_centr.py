@@ -2,10 +2,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from solvers.decMCTS_config import *
+from solvers.graphing import create_sop_instance
+from solvers.masop_solver_config import *
 from solvers.my_DecMCTS import Tree
 from solvers.sim_brvns import sim_brvns
-from utils.graphing import create_sop_instance
 
 if __name__ == "__main__":
 

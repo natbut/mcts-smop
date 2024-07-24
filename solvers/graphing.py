@@ -1,5 +1,4 @@
 from copy import deepcopy
-from math import ceil
 
 import numpy as np
 from scipy.stats import norm

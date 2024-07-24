@@ -282,7 +282,7 @@ class Tree:
                     self.data, robot_temp_state, sim_action, self.id)
                 system_state[self.id] = robot_temp_state
 
-            # calculate the reward at the end of simulation
+            # calculate the reward at the end of simulation using "local utiliity" reward as described in paper
             # TODO incorporate failure here for sopcc
             rew = self.reward(self.data, system_state, self.id)
             cum_reward += rew
