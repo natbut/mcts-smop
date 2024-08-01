@@ -1,0 +1,18 @@
+# PROBLEM PARAMETERS
+
+problem_size: 20
+edges_mean_range:
+  - 3 # min
+  - 10 # max
+reward_range:
+  - 1 # min
+  - 1 # max
+c: 0.75  # variance modifier (0.05=low, 0.25=med, 0.75=high)
+num_robots: 4
+budget: 20
+velocity: 1
+start: 'vs'
+end: 'vg'
+m_id: -1
+
+basic: True

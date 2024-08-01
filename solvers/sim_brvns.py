@@ -196,7 +196,7 @@ def BRVNS(initial_solution,
     # print("Initial Solution:", initial_solution)
     baseSol = initial_solution
     bestSol = initial_solution
-    det_reward_base = det_reward(baseSol, graph, budget)
+    det_reward_base = routes_det_reward(baseSol, graph, budget)
     stoch_reward, reliability = fast_simulation(baseSol,
                                                 graph,
                                                 budget,
@@ -225,7 +225,7 @@ def BRVNS(initial_solution,
             newSol = biased_insertion(newSol, graph, budget, beta2=0.3)
             # print("Checking sol.:", newSol, " | Current k:", k)
 
-            det_reward_new = det_reward(newSol, graph, budget)
+            det_reward_new = routes_det_reward(newSol, graph, budget)
             # print("New det:", det_reward_new, " Base det:", det_reward_base)
             if det_reward_new > det_reward_base:
                 # print("Better than base det, check stoch")

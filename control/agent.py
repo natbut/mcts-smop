@@ -5,9 +5,8 @@ from control.env_model import EnvironmentModel, TaskNode
 from sim.comms_manager import CommsManager_Basic, Message
 from sim.environment import Environment
 # TODO using separate scheduling class we should be able to clear out these imports
-from solvers.masop_solver_config import State
+from solvers.masop_solver_config import State, fast_simulation
 from solvers.my_DecMCTS import ActionDistribution
-from solvers.sim_brvns import fast_simulation
 
 
 # TODO: Think about sharing completed tasks between agents

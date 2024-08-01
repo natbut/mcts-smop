@@ -2,7 +2,6 @@ from copy import deepcopy
 
 import numpy as np
 
-from control.passenger import Passenger
 from solvers.graphing import Graph
 
 
@@ -21,7 +20,7 @@ class State:
 
 # === GENERAL HELPER FUNCTIONS ===
 
-def det_reward(solution, graph: Graph, budget):
+def routes_det_reward(solution, graph: Graph, budget):
     """
     Evaluate cost of each route (list of vertices) in solution using graph. If cost is within budget, add rewards from route to rewards sum. Return sum.
     """
@@ -40,7 +39,7 @@ def route_det_cost(route, graph: Graph):
     return sum(graph.get_mean_cost_edgeWork((route[i], route[i+1])) for i in range(len(route)-1))
 
 
-def stoch_reward(solution, graph: Graph, budget):
+def routes_stoch_reward(solution, graph: Graph, budget):
     """
     Evaluate cost of each route (list of vertices) in solution using graph. If cost is within budget, add rewards from route to rewards sum. Return sum.
     """
@@ -71,7 +70,7 @@ def fast_simulation(solution, graph: Graph, budget, iterations):
     rewards = []
     fails = 0
     for _ in range(iterations):
-        rew, fail = stoch_reward(solution, graph, budget)
+        rew, fail = routes_stoch_reward(solution, graph, budget)
         rewards.append(rew)
         fails += fail
     return sum(rew for rew in rewards) / iterations, (iterations - fails) / iterations
@@ -83,16 +82,10 @@ def intensive_simulation(elite_solutions, graph, budget, iterations):
     Get reward through MCS approach. Return average reward and reliability (percent success)
     """
     # NOTE Same as fast simulation for now
-    rewards = []
-    fails = 0
-    for _ in range(iterations):
-        rew, fail = stoch_reward(elite_solutions, graph, budget)
-        rewards.append(rew)
-        fails += fail
-    return sum(rew for rew in rewards) / iterations, (iterations - fails) / iterations
+    return fast_simulation(elite_solutions, graph, budget, iterations)
 
 
-def calculate_global_potential_reward(graph: Graph, agent_list: list[Passenger]):
+def calculate_final_potential_reward(graph: Graph, agent_list):
     # Return sum of reward for each unique task visited (duplicates don't reward)
     all_tasks_visited = []
     for a in agent_list:
@@ -101,8 +94,10 @@ def calculate_global_potential_reward(graph: Graph, agent_list: list[Passenger])
     return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) / len(graph.vertices)
 
 
-def calculate_global_reward(graph: Graph, agent_list: list[Passenger]):
-    # Return sum of reward for each unique task visited (duplicates don't reward)
+def calculate_final_reward(graph: Graph, agent_list):
+    """
+    Return sum of reward for each unique task visited (duplicates don't reward)
+    """
     all_tasks_visited = []
     for a in agent_list:
         if not a.dead:
@@ -125,10 +120,8 @@ def local_util_reward(data: dict, states: dict[State], rob_id):
             if robot != rob_id:
                 tasks_without_robot_i += states[robot].action_seq
             all_tasks_visited += states[robot].action_seq
-    # print("all tasks visited:", all_tasks_visited)
     unique_tasks_visited = set(all_tasks_visited)
     unique_tasks_visited_without = set(tasks_without_robot_i)
-    # print("unique tasks visited:", unique_tasks_visited)
     graph = data["graph"]
     return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) - sum(graph.rewards[task_id] for task_id in unique_tasks_visited_without)
 

@@ -3,9 +3,10 @@ from __future__ import print_function
 from copy import copy
 from math import log
 
-import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
+
+from solvers.masop_solver_config import *
 
 
 def _UCT(mu_j, c_p, n_p, n_j):
@@ -94,22 +95,17 @@ class Tree:
 
     def __init__(self,
                  data,
-                 reward_func,
-                 avail_actions_func,
-                 state_store_func,
-                 sim_selection_func,
-                 sim_avail_actions_func,
                  comm_n,
                  robot_id,
                  c_p=1):
 
         self.data = data
         self.graph = nx.DiGraph()
-        self.reward = reward_func
-        self.available_actions = avail_actions_func
-        self.sim_available_actions = sim_avail_actions_func
-        self.state_store = state_store_func
-        self.sim_selection_func = sim_selection_func
+        self.reward = local_util_reward
+        self.available_actions = avail_actions
+        self.sim_available_actions = sim_get_actions_available
+        self.state_store = state_storer
+        self.sim_selection_func = sim_select_action
         self.c_p = c_p
         self.id = robot_id
         self.comms = {}  # Plan with no robots initially

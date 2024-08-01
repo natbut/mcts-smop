@@ -7,7 +7,6 @@ import yaml
 
 from control.agent import Agent
 from sim.comms_manager import CommsManager_Basic
-from solvers.masop_solver_config import *
 from solvers.my_DecMCTS import ActionDistribution, Tree
 
 # TODO: Think about how to share completed tasks between agents
@@ -71,7 +70,7 @@ class Passenger(Agent):
                                                   perf_thresh,
                                                   sim_iters)
 
-    def optimize_schedule(self, comms_mgr: CommsManager_Basic, agent_list, sim_config):
+    def optimize_schedule_distr(self, comms_mgr: CommsManager_Basic, agent_list, sim_config):
 
         # No optimization if returning home or at home
         if self.sim_data["start"] == self.sim_data["end"]:
@@ -87,11 +86,6 @@ class Passenger(Agent):
         data["budget"] = self.sim_data["budget"]
 
         tree = Tree(data,
-                    local_util_reward,
-                    avail_actions,
-                    state_storer,
-                    sim_select_action,
-                    sim_get_actions_available,
                     comm_n=self.solver_params["comm_n"],
                     robot_id=self.id)
 
@@ -102,7 +96,7 @@ class Passenger(Agent):
             # Alg1. GROW TREE & UPDATE DISTRIBUTION
             tree.grow()
             # NOTE removed comms stuff here because unrealistic. Handling elsewhere.
-            # TODO do testing with comms exchange added back in...
+            # TODO testing with comms exchange added back in...
             for target in agent_list:
                 if target.id != self.id:
                     self.send_message(comms_mgr,
@@ -316,7 +310,34 @@ def generate_passengers_with_data(solver_params, sim_data) -> list[Passenger]:
     return pssngr_list
 
 
-def generate_passengers_from_config(config_filepath) -> list[Passenger]:
+def generate_passengers_from_config(solver_config_fp,
+                                    problem_config_fp,
+                                    planning_graph) -> list[Passenger]:
+
+    with open(problem_config_fp, "r") as p_fp:
+        prob_config = yaml.safe_load(p_fp)
+        with open(solver_config_fp, "r") as s_fp:
+            solve_config = yaml.safe_load(s_fp)
+
+            sim_data = {"graph": deepcopy(planning_graph),
+                        "start": prob_config["start"],
+                        "end": prob_config["end"],
+                        "budget": prob_config["budget"],
+                        "velocity": prob_config["velocity"],
+                        "basic": prob_config["basic"],
+                        "m_id": prob_config["m_id"]
+                        }
+
+            dec_mcts_data = {"num_robots": prob_config["num_robots"],
+                             "fail_prob": solve_config["failure_probability"],
+                             "comm_n": solve_config["comm_n"],
+                             "plan_iters": solve_config["planning_iters"]
+                             }
+
+    return generate_passengers_with_data(dec_mcts_data, sim_data)
+
+
+def generate_passengers_for_OceanSim(config_filepath) -> list[Passenger]:
 
     pssngr_list = []
 

@@ -1,0 +1,14 @@
+# DEFINE TEST PARAMETERS
+
+trials: 5
+
+comms_succ_prob: 1.00  # % successful messages
+edge_discovery_prob: 1.00 # % chance agent has at each time step for discovering random edge
+
+# == Define each type of test that will run on each test case (trial)
+sim_configs:
+  - "Cent | Best"
+  - "Cent | Stoch"
+  - "Dist | Stoch"
+  - "Hybrid1 | Stoch"
+  - "Hybrid2 | Stoch"

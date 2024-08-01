@@ -2,6 +2,7 @@ import random
 from copy import deepcopy
 
 import numpy as np
+import yaml
 
 from control.agent import Agent
 from sim.comms_manager import CommsManager_Basic
@@ -144,3 +145,36 @@ def generate_mothership_with_data(id, solver_params, sim_data) -> Mothership:
                    sim_data=deepcopy(sim_data)
                    )
     return m
+
+
+def gen_mother_from_config(solver_config_fp,
+                           problem_config_fp,
+                           planning_graph) -> Mothership:
+
+    with open(problem_config_fp, "r") as p_fp:
+        prob_config = yaml.safe_load(p_fp)
+        with open(solver_config_fp, "r") as s_fp:
+            solve_config = yaml.safe_load(s_fp)
+
+            sim_data = {"graph": deepcopy(planning_graph),
+                        "start": prob_config["start"],
+                        "end": prob_config["end"],
+                        "budget": prob_config["budget"],
+                        "velocity": prob_config["velocity"],
+                        "basic": prob_config["basic"],
+                        "m_id": prob_config["m_id"]
+                        }
+
+            sim_brvns_data = {"num_robots": prob_config["num_robots"],
+                              "alpha": solve_config["alpha"],
+                              "beta": solve_config["beta"],
+                              "k_initial": solve_config["k_initial"],
+                              "k_max": solve_config["k_max"],
+                              "t_max": solve_config["t_max"],
+                              "explore_iters": solve_config["exploratory_mcs_iters"],
+                              "intense_iters": solve_config["intensive_mcs_iters"]
+                              }
+
+    return generate_mothership_with_data(sim_data["m_id"],
+                                         sim_brvns_data,
+                                         sim_data)

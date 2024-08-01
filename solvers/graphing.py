@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 import numpy as np
+import yaml
 from scipy.stats import norm
 
 
@@ -113,3 +114,15 @@ def create_true_graph(stoch_graph: Graph, c=0.05) -> Graph:
             loc=cost_sample, scale=stddev)
 
     return true_graph
+
+
+def create_sop_inst_from_config(config_filepath) -> Graph:
+
+    with open(config_filepath, "r") as f:
+        config = yaml.safe_load(f)
+
+        return create_sop_instance(config["problem_size"],
+                                   config["edges_mean_range"],
+                                   config["c"],
+                                   config["reward_range"],
+                                   rand_seed=np.random.randint(100))
