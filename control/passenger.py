@@ -7,6 +7,7 @@ import yaml
 
 from control.agent import Agent
 from sim.comms_manager import CommsManager_Basic
+from solvers.masop_solver_config import State
 from solvers.my_DecMCTS import ActionDistribution, Tree
 
 # TODO: Think about how to share completed tasks between agents
@@ -38,7 +39,7 @@ class Passenger(Agent):
 
     def update_my_best_action_dist(self,
                                    new_act_dist: ActionDistribution, rel_thresh=0.99,
-                                   perf_thresh=0.9,
+                                   rel_mod=0.9,
                                    sim_iters=10
                                    ):
         # Automatically use schedule if currently have no schedule
@@ -65,12 +66,15 @@ class Passenger(Agent):
         #     return
 
         # Otherwise, distro
-        return super().update_my_best_action_dist(new_act_dist,
-                                                  rel_thresh,
-                                                  perf_thresh,
-                                                  sim_iters)
+        super().update_my_best_action_dist(new_act_dist,
+                                           rel_thresh,
+                                           rel_mod,
+                                           sim_iters)
 
-    def optimize_schedule_distr(self, comms_mgr: CommsManager_Basic, agent_list, sim_config):
+    def optimize_schedule_distr(self, comms_mgr: CommsManager_Basic, agent_list, sim_config, rel_mod):
+
+        if (not self.event) or self.dead or self.finished:
+            return
 
         # No optimization if returning home or at home
         if self.sim_data["start"] == self.sim_data["end"]:
@@ -106,15 +110,16 @@ class Passenger(Agent):
         # Evaluate candidate solutions against current stored elites, reduce to subset of size n_comms, select best act sequence from elites as new schedule
         # NOTE only need to do this type of solution merge if hybrid
         if "Hybrid" in sim_config:
-            candidate_states = tree.my_act_dist
-            self.update_my_best_action_dist(candidate_states)
+            self.update_my_best_action_dist(tree.my_act_dist, rel_mod=rel_mod)
             # Send updated distro to M for use in scheduling other robots
             self.send_message(
                 comms_mgr, self.sim_data["m_id"], ("Update", self.my_action_dist))
-        else:
+        else:  # For distributed-only
             self.my_action_dist = tree.my_act_dist
 
+        # Select schedule to be used by agent
         self.schedule = self.my_action_dist.best_action().action_seq[:]
+        print("!! Schedule selected:", self.schedule, "\n")
 
         # Remove event flag once schedule is updated
         self.event = False
@@ -128,34 +133,34 @@ class Passenger(Agent):
 
     # === ACTIONS ===
 
-    def action_update(self, true_graph, sim_config):
+    def action_update(self, true_graph, comms_mgr, agent_list, sim_config):
         """
         Update action according to current agent status and local schedule
         """
-        print("Passenger", self.id, " Current action:",
-              self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
+        # print("Passenger", self.id, " Current action:",
+        #       self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
         # ("IDLE", -1)
         # === BREAKING CRITERIA ===
         # If out of energy, don't do anything
         if self.sim_data["budget"] < 0 and not self.finished:
             self.action[0] = self.IDLE
             self.dead = True
-            print("Agent", self.id, " Updated action:",
-                  self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
+            # print("Agent", self.id, " Updated action:",
+            #       self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
             return
 
         # If home and idle with no schedule, do nothing
         if (self.action[0] == self.IDLE
                 and self.action[1] == self.sim_data["end"]):
             self.finished = True
-            print("Agent", self.id, " Updated action:",
-                  self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
+            # print("Agent", self.id, " Updated action:",
+            #       self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
             return
 
         # If waiting for init schedule command from comms
         if len(self.schedule) == 0 and self.action[1] == "Init":
-            print("Agent", self.id, " Updated action:",
-                  self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
+            # print("Agent", self.id, " Updated action:",
+            #       self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
             return
 
         # TODO some tours end with [vg] in schedule. Are these robots dead? Is there a logic error here?
@@ -172,15 +177,17 @@ class Passenger(Agent):
 
             if self.sim_data["basic"]:
                 # print(self.id, "Traveling to new task on edge", edge)
-                if "Stoch" in sim_config:
-                    self.travel_remaining = true_graph.sample_edge_stoch(
-                        edge)
-                else:
-                    self.travel_remaining = true_graph.get_edge_mean(
-                        edge)
+                # if "Stoch" in sim_config:
+                #     self.travel_remaining = true_graph.sample_edge_stoch(
+                #         edge)
+                # else:
+                self.travel_remaining = true_graph.get_edge_mean(edge)
                 # print("remove", leaving, " from graph verts:",
                 #       self.sim_data["graph"].vertices)
-                self.sim_data["graph"].vertices.remove(leaving)
+                if leaving in self.sim_data["graph"].vertices:
+                    self.sim_data["graph"].vertices.remove(leaving)
+                    if leaving not in self.completed_tasks:
+                        self.completed_tasks.append(leaving)
                 self.sim_data["graph"].edges.remove(edge)
                 self.sim_data["start"] = self.action[1]
                 # print(self.id, "Traveling to",
@@ -214,18 +221,57 @@ class Passenger(Agent):
             self.event = True
             self.action[0] = self.IDLE
             self.completed_tasks.append(self.action[1])
+            content = ("Complete Task", self.action[1])
+            self.broadcast_message(comms_mgr, agent_list, sim_config, content)
+
         elif self.action[0] == self.WORKING and self.work_remaining > 0:
             # otherwise, continue working
             # print(self.id, "Work in progress")
             self.work_remaining -= 1
 
-        print("Agent", self.id, " Updated action is", self.action,
-              " | Schedule:", self.schedule)
+        # print("Agent", self.id, " Updated action is", self.action,
+        #       " | Schedule:", self.schedule)
 
     # === FUNCTIONS FOR EXPLORING SIMULATION ===
 
+    def broadcast_message(self, comms_mgr, agent_list, sim_config, content):
+        for target in agent_list:
+            if target.id != self.id:
+                self.send_message(comms_mgr,
+                                  target.id,
+                                  content)
+        if "Hybrid" in sim_config:
+            self.send_message(
+                comms_mgr, self.sim_data["m_id"], content)
+
+    def have_failure(self, comms_mgr, agent_list, sim_config, ):
+        self.action[0] = self.IDLE
+        self.dead = True
+        self.sim_data["budget"] = -1
+        print("!! ROBOT", self.id, " FAILURE")
+
+        # NOTE communicates that failure has occurred
+        # Send out an empty action distro to all agents and mothership
+        self.my_action_dist = ActionDistribution([State([], -1)], [1])
+        content = ("Update", self.my_action_dist)
+
+        self.broadcast_message(comms_mgr, agent_list, sim_config, content)
+
+    def random_failure(self, comms_mgr, agent_list, sim_config, robot_fail_prob=0.0):
+        """
+        Active robots may incur random failures, with varying effects on performance
+        """
+        if self.action[0] != self.IDLE:
+            sample = np.random.random()
+            if sample > robot_fail_prob:
+                # No failure
+                return
+            self.have_failure(comms_mgr, agent_list, sim_config)
+
     def edge_discover(self, true_graph, comms_mgr, agent_list, sim_config, discovery_prob):
-        # Active agents may discover random edges with probability discovery_prob
+        """
+        Active agents may discover random edges with probability discovery_prob
+        """
         if self.action[0] != self.IDLE:
             sample = np.random.random()
             # Prob of returning early

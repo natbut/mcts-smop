@@ -2,8 +2,15 @@
 
 trials: 5
 
-comms_succ_prob: 1.00  # % successful messages
-edge_discovery_prob: 1.00 # % chance agent has at each time step for discovering random edge
+comms_succ_prob_m: 0.50  # % successful messages with mothership
+comms_succ_prob_p: 0.05  # % successful messages between passengers
+edge_discovery_prob: 0.00 # % chance agent has at each time step for discovering random edge
+new_task_prob: 0.00 # % chance new task appears each time step
+robot_fail_prob: 0.00 # % chance a robot fails each time step
+percent_fail: 0.5 # % of robots that will fail at fail_timestep
+fail_timeStep: 5
+
+rel_mod: 0.01
 
 # == Define each type of test that will run on each test case (trial)
 sim_configs:

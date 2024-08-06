@@ -104,12 +104,21 @@ class CommsManager:
 
 class CommsManager_Basic:
 
-    def __init__(self, agent_list, comms_succ_prob) -> None:
+    def __init__(self,
+                 agent_list,
+                 comms_succ_prob_m,
+                 comms_succ_prob_p,
+                 m_id
+                 ) -> None:
+
         self.agent_dict = {}
         for a in agent_list:
             self.agent_dict[a.id] = a
-        self.success_prob = comms_succ_prob
+        self.success_prob_m = comms_succ_prob_m
+        self.success_prob_p = comms_succ_prob_p
         self.agent_comms_dict = {}
+
+        self.m_id = m_id
 
         # list of "active messages" being passed by manager
         self.active_msgs = []
@@ -139,7 +148,17 @@ class CommsManager_Basic:
                 arrive_msg = self.active_msgs.pop(i)
                 # probability that message is lost
                 samp = np.random.random()
-                if samp <= self.success_prob:
-                    # Remove & send received message
-                    self.agent_dict[msg.receiver_id].receive_message(
-                        self, arrive_msg)
+
+                # Agent-dependent comms
+                if msg.receiver_id == self.m_id or msg.sender_id == self.m_id:
+                    # Using mothership, check m_success
+                    if samp <= self.success_prob_m:
+                        # Remove & send received message
+                        self.agent_dict[msg.receiver_id].receive_message(
+                            self, arrive_msg)
+                else:
+                    # Using passengers, check p_success
+                    if samp <= self.success_prob_p:
+                        # Remove & send received message
+                        self.agent_dict[msg.receiver_id].receive_message(
+                            self, arrive_msg)

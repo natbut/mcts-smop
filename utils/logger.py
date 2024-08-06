@@ -16,7 +16,7 @@ def init_logger(name: str, log_level: int = logging.INFO) -> logging.Logger:
 class FileLogger:
     """Manages logging data to a file."""
 
-    def __init__(self, filename: str | None = None):
+    def __init__(self, filename: str = None):
         log_dir = os.path.join(os.getcwd(), "logs")
 
         if not os.path.isdir(log_dir):
@@ -33,15 +33,16 @@ class FileLogger:
         self.log_file = open(filename, "w")  # type: ignore
 
         self.log_file.write(
-            "trial,best,frontEndOnly,distrOnly,twoStep,hybrid,position6\n"
-            # "velocity1,velocity2,velocity3,velocity4,velocity5,velocity6,control_input1,"
-            # "control_input2,control_input3,control_input4,control_input5,control_input6,"
-            # "end_effector_x,end_effector_y,end_effector_z\n"
+            "trial,best,"
+            "frontEndOnly_rew,frontEndOnly_potent,frontEndOnly_percDead,"
+            "distrOnly_rew,distrOnly_potent,distrOnly_percDead,"
+            "twoStep_rew,twoStep_potent,twoStep_percDead,"
+            "hybrid_rew,hybrid_potent,hybrid_percDead\n"
         )
 
     def __call__(
         self,
-        trials_arr: np.ndarray,
+        trial: int,
         best_results: np.ndarray,
         frontEnd_results: np.ndarray,
         distrOnly_results: np.ndarray,
@@ -49,9 +50,9 @@ class FileLogger:
         hybrid_results: np.ndarray,
     ):
         self.log_file.write(
-            f"{timestamp},{thetas[0]},{thetas[1]},{thetas[2]},{thetas[3]},{thetas[4]},"
-            f"{thetas[5]},{theta_dots[0]},{theta_dots[1]},{theta_dots[2]},"
-            f"{theta_dots[3]},{theta_dots[4]},{theta_dots[5]},{taus[0]},{taus[1]},"
-            f"{taus[2]},{taus[3]},{taus[4]},{taus[5]},{ee_pos[0]},{ee_pos[1]},"
-            f"{ee_pos[2]}\n"
+            f"{trial},{best_results[0]},"
+            f"{frontEnd_results[0]},{frontEnd_results[1]},{frontEnd_results[2]},"
+            f"{distrOnly_results[0]},{distrOnly_results[1]},{distrOnly_results[2]},"
+            f"{twoPart_results[0]},{twoPart_results[1]},{twoPart_results[2]},"
+            f"{hybrid_results[0]},{hybrid_results[1]},{hybrid_results[2]}\n"
         )

@@ -20,6 +20,11 @@ class State:
 
 # === GENERAL HELPER FUNCTIONS ===
 
+def chance_task_add(pssngr_list, new_task_prob):
+
+    return
+
+
 def routes_det_reward(solution, graph: Graph, budget):
     """
     Evaluate cost of each route (list of vertices) in solution using graph. If cost is within budget, add rewards from route to rewards sum. Return sum.
@@ -91,7 +96,7 @@ def calculate_final_potential_reward(graph: Graph, agent_list):
     for a in agent_list:
         all_tasks_visited += a.completed_tasks
     unique_tasks_visited = set(all_tasks_visited)
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) / len(graph.vertices)
+    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) / sum(graph.rewards[task_id] for task_id in graph.vertices)
 
 
 def calculate_final_reward(graph: Graph, agent_list):
@@ -103,7 +108,7 @@ def calculate_final_reward(graph: Graph, agent_list):
         if not a.dead:
             all_tasks_visited += a.completed_tasks
     unique_tasks_visited = set(all_tasks_visited)
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) / len(graph.vertices)
+    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) / sum(graph.rewards[task_id] for task_id in graph.vertices)
 
 
 def local_util_reward(data: dict, states: dict[State], rob_id):

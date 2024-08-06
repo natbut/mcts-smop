@@ -55,6 +55,7 @@ class Agent:
                 # Allow any states where action[1] appears in the schedule, then trim the front end of the state's schedule to start with action[1]
                 if self.action[1] in state.action_seq:
                     # NOTE trim to self.action[1]
+                    # NOTE This also kind of happens in action_update
                     v = state.action_seq[0]
                     while v != self.action[1]:
                         state.action_seq.pop(0)
@@ -67,7 +68,7 @@ class Agent:
     def update_my_best_action_dist(self,
                                    new_act_dist: ActionDistribution,
                                    rel_thresh=0.99,
-                                   perf_thresh=0.9,
+                                   rel_mod=0.5,
                                    sim_iters=10):
         # TODO Make this more generic to be usable by Mothership
 
@@ -100,7 +101,7 @@ class Agent:
                     rels.append(rel)
                     usable_states.append(state)
 
-        print("Agent", self.id, "usable states:", len(usable_states))
+        # print("Agent", self.id, "usable states:", len(usable_states))
 
         # NOTE attempt to GO HOME if no usable schedules
         if len(usable_states) == 0:
@@ -113,7 +114,7 @@ class Agent:
         # normalize rewards (0,1), sort by rew_norm + rel values
         rewards = np.array(self.normalize(rewards))
         rels = np.array(rels)
-        scores = rewards + rels
+        scores = rewards + rels * rel_mod
         pairs = list(zip(scores, usable_states))
         sorted_pairs = sorted(pairs, key=lambda pair: pair[0], reverse=True)
         rewards, states = zip(*sorted_pairs)
@@ -122,7 +123,6 @@ class Agent:
         # Update action distribution
         # NOTE we are now using rew+rel as score for determining q vals in hybrid approach
         self.my_action_dist = ActionDistribution(top_states, top_scores)
-        self.event = False
 
         print("Agent", self.id, ": Updated distro:\n", self.my_action_dist)
 
@@ -172,6 +172,9 @@ class Agent:
             if msg.content[0] == "Edge":
                 self.sim_data["graph"].cost_distributions[msg.content[1]
                                                           ] = msg.content[2]
+            if msg.content[0] == "Complete Task":
+                if msg.content[1] in self.sim_data["graph"].vertices:
+                    self.sim_data["graph"].vertices.remove(msg.content[1])
 
     # === REALISTIC SIM COMPONENTS ===
 

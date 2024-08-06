@@ -1,12 +1,13 @@
 import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
-def plot_mpc_results_from_log(log_fp, title="MPC Results"):
+def plot_mpc_results_from_log(log_fp):
     """
-    Plots the results of MPC from given log file.
+    Plots the results of simulation from given log file.
 
     Args:
         log_fp (str): filepath to log (csv)
@@ -19,83 +20,130 @@ def plot_mpc_results_from_log(log_fp, title="MPC Results"):
 
     df = pd.read_csv(log_fp)
 
-    time = df["timestamp"]
-    joint_positions = df[[
-        col for col in df.columns if "position" in col]].values
-    joint_velocities = df[[
-        col for col in df.columns if "velocity" in col]].values
-    control_inputs = df[[
-        col for col in df.columns if "control_input" in col]].values
-    end_eff = df[[col for col in df.columns if "end_effector" in col]].values
+    trial = df["trial"]
+    best = df["best"]
+    frontEndOnly = df[[
+        col for col in df.columns if "frontEndOnly" in col]].values
+    distrOnly = df[[
+        col for col in df.columns if "distrOnly" in col]].values
+    twoStep = df[[
+        col for col in df.columns if "twoStep" in col]].values
+    hybrid = df[[
+        col for col in df.columns if "hybrid" in col]].values
 
-    plot_mpc_results(
-        time, joint_positions, joint_velocities, control_inputs, end_eff, title, name
-    )
+    title = "Results for test " + name
+
+    plot_results(trial,
+                 best,
+                 frontEndOnly,
+                 distrOnly,
+                 twoStep,
+                 hybrid,
+                 title,
+                 name
+                 )
 
 
-def plot_mpc_results(
-    time,
-    joint_positions,
-    joint_velocities,
-    control_inputs,
-    end_eff,
-    title="MPC Results",
-    figname="fig",
-):
-    """
-    Plots the results of MPC from given joint positions, velocities, and control inputs.
+def plot_results(trial,
+                 best,
+                 frontEnd_results,
+                 distrOnly_results,
+                 twoPart_results,
+                 hybrid_results,
+                 title="Results",
+                 figname="Fig"
+                 ):
 
-    Args:
-        time (np.ndarray): Time array.
-        joint_positions (np.ndarray): Joint positions array with shape (n_steps, n_joints).
-        joint_velocities (np.ndarray): Joint velocities array with shape (n_steps, n_joints).
-        control_inputs (np.ndarray): Control inputs (torques) array with shape (n_steps, n_joints).
-        end_eff (np.ndarray):
-        title (str): Title of the plot.
-    """
+    # Mean Rewards
+    best_rew = round(np.mean(best), 2)
+    frontEnd_rew = round(np.mean([res[0] for res in frontEnd_results]), 2)
+    distrOnly_rew = round(np.mean([res[0] for res in distrOnly_results]), 2)
+    twoPart_rew = round(np.mean([res[0] for res in twoPart_results]), 2)
+    hybrid_rew = round(np.mean([res[0] for res in hybrid_results]), 2)
+    # Mean potential rewards
+    frontEnd_pot = round(np.mean([res[1] for res in frontEnd_results]), 2)
+    distrOnly_pot = round(np.mean([res[1] for res in distrOnly_results]), 2)
+    twoPart_pot = round(np.mean([res[1] for res in twoPart_results]), 2)
+    hybrid_pot = round(np.mean([res[1] for res in hybrid_results]), 2)
+    # Mean robots lost
+    frontEnd_fails = round(np.mean([res[2] for res in frontEnd_results]), 2)
+    distrOnly_fails = round(np.mean([res[2] for res in distrOnly_results]), 2)
+    twoPart_fails = round(np.mean([res[2] for res in twoPart_results]), 2)
+    hybrid_fails = round(np.mean([res[2] for res in hybrid_results]), 2)
 
-    n_joints = joint_positions.shape[1]
+    # StdErr
+    # Rewards
+    best_se = np.std(best) / np.sqrt(len(best))
+    frontEnd_rew_se = np.std([res[0] for res in frontEnd_results]) / \
+        np.sqrt(len(frontEnd_results))
+    distrOnly_rew_se = np.std([res[0] for res in distrOnly_results]) / \
+        np.sqrt(len(distrOnly_results))
+    twoPart_rew_se = np.std([res[0] for res in twoPart_results]) / \
+        np.sqrt(len(twoPart_results))
+    hybrid_rew_se = np.std([res[0] for res in hybrid_results]) / \
+        np.sqrt(len(hybrid_results))
+    # Potentials
+    frontEnd_pot_se = np.std([res[1] for res in frontEnd_results]) / \
+        np.sqrt(len(frontEnd_results))
+    distrOnly_pot_se = np.std([res[1] for res in distrOnly_results]) / \
+        np.sqrt(len(distrOnly_results))
+    twoPart_pot_se = np.std([res[1] for res in twoPart_results]) / \
+        np.sqrt(len(twoPart_results))
+    hybrid_pot_se = np.std([res[1] for res in hybrid_results]) / \
+        np.sqrt(len(hybrid_results))
 
-    fig, axes = plt.subplots(nrows=3, ncols=1, sharex=True)
+    avg_rew = [frontEnd_rew, distrOnly_rew, twoPart_rew, hybrid_rew]
 
-    # Plot joint positions
-    axes[0].set_title("Joint Positions")
-    for i in range(n_joints):
-        axes[0].plot(time, joint_positions[:, i], label=f"Joint {i+1}")
-    axes[0].set_ylabel("Position (rad)")
-    axes[0].legend()
-    axes[0].grid(True)
+    avg_pot = [frontEnd_pot, distrOnly_pot, twoPart_pot, hybrid_pot]
 
-    # Plot joint velocities
-    axes[1].set_title("Joint Velocities")
-    for i in range(n_joints):
-        axes[1].plot(time, joint_velocities[:, i], label=f"Joint {i+1}")
-    axes[1].set_ylabel("Velocity (rad/s)")
-    axes[1].legend()
-    axes[1].grid(True)
+    error_rew = [frontEnd_rew_se, distrOnly_rew_se,
+                 twoPart_rew_se, hybrid_rew_se]
 
-    # Plot control inputs
-    axes[2].set_title("Control Inputs")
-    for i in range(n_joints):
-        axes[2].plot(time, control_inputs[:, i], label=f"Joint {i+1}")
-    axes[2].set_ylabel("Torque? (Nm)")
-    axes[2].set_xlabel("Time (s)")
-    axes[2].legend()
-    axes[2].grid(True)
+    error_pot = [frontEnd_pot_se, distrOnly_pot_se,
+                 twoPart_pot_se, hybrid_pot_se]
 
-    fig.suptitle(title)
+    rew_content = {
+        "Tasks Visited": (avg_pot, error_pot),
+        "Tasks Returned": (avg_rew, error_rew),
+    }
+
+    labels = ["Best", "Front-End Only",
+              "Distr. Only", "Front End\n+ Dist Replan",
+              "Front End\n+ Hybrid Replan"]
+
+    # Plot results
+    fig, ax = plt.subplots()
     # plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    fig.savefig(f"{figname}.png", bbox_inches="tight")
 
-    # Plot end effector trajectory
-    fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-    # axes[0:2, 1].set_title("End Effector")
-    ax.scatter(xs=end_eff[0], ys=end_eff[1], zs=end_eff[2])
-    # axes[0:2, 1].set_ylabel("Y Pos")
-    # axes[0:2, 1].set_xlabel("X Pos")
-    # axes[0:2, 1].set_zlabel("Z Pos")
-    # axes[0:2, 1].grid(True)
+    x = np.arange(len(labels))
+    width = 0.3
+    multiplier = 0
+    rects = ax.bar(
+        x[0]+(width/2), best_rew, width, yerr=best_se,  label="Best")
+    ax.bar_label(rects, padding=3)
 
-    fig.suptitle(title)
-    # plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    fig.savefig(f"{figname}_endeff.png", bbox_inches="tight")
+    for attribute, measurements in rew_content.items():
+        offset = width * multiplier
+        x_temp = x[1:] + offset
+        rects = ax.bar(
+            x_temp, measurements[0], width, yerr=measurements[1],  label=attribute)
+        ax.bar_label(rects, padding=3)
+        multiplier += 1
+
+    # ax.bar(x, avg_tasks, yerr=error_bars, capsize=5,
+    #        color=['blue', 'lightblue', 'red', 'green', 'darkviolet'])
+
+    ax.set_xticks(x+width/2, labels)
+    ax.set_ylabel('Percent Task Completion')
+    ax.set_title(title)
+    ax.set_ybound(0.0, 1.0)
+    if hybrid_rew < 0.5:
+        ax.legend(loc='upper right', ncols=1)
+    else:
+        ax.legend(loc='lower right', ncols=1)
+
+    fig.savefig(f"{figname}.png")
+
+    print("Done")
+
+    plt.show()
