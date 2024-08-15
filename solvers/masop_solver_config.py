@@ -20,11 +20,6 @@ class State:
 
 # === GENERAL HELPER FUNCTIONS ===
 
-def chance_task_add(pssngr_list, new_task_prob):
-
-    return
-
-
 def routes_det_reward(solution, graph: Graph, budget):
     """
     Evaluate cost of each route (list of vertices) in solution using graph. If cost is within budget, add rewards from route to rewards sum. Return sum.
@@ -90,16 +85,16 @@ def intensive_simulation(elite_solutions, graph, budget, iterations):
     return fast_simulation(elite_solutions, graph, budget, iterations)
 
 
-def calculate_final_potential_reward(graph: Graph, agent_list):
+def calculate_final_potential_reward(task_dict, agent_list):
     # Return sum of reward for each unique task visited (duplicates don't reward)
     all_tasks_visited = []
     for a in agent_list:
         all_tasks_visited += a.completed_tasks
     unique_tasks_visited = set(all_tasks_visited)
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) / sum(graph.rewards[task_id] for task_id in graph.vertices)
+    return sum(task_dict[task_id].reward for task_id in unique_tasks_visited) / sum(task_dict[task_id].reward for task_id in task_dict)
 
 
-def calculate_final_reward(graph: Graph, agent_list):
+def calculate_final_reward(task_dict, agent_list):
     """
     Return sum of reward for each unique task visited (duplicates don't reward)
     """
@@ -108,7 +103,7 @@ def calculate_final_reward(graph: Graph, agent_list):
         if not a.dead:
             all_tasks_visited += a.completed_tasks
     unique_tasks_visited = set(all_tasks_visited)
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) / sum(graph.rewards[task_id] for task_id in graph.vertices)
+    return sum(task_dict[task_id].reward for task_id in unique_tasks_visited) / sum(task_dict[task_id].reward for task_id in task_dict)
 
 
 def local_util_reward(data: dict, states: dict[State], rob_id):
@@ -127,8 +122,8 @@ def local_util_reward(data: dict, states: dict[State], rob_id):
             all_tasks_visited += states[robot].action_seq
     unique_tasks_visited = set(all_tasks_visited)
     unique_tasks_visited_without = set(tasks_without_robot_i)
-    graph = data["graph"]
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited) - sum(graph.rewards[task_id] for task_id in unique_tasks_visited_without)
+    task_dict = data["task_dict"]
+    return sum(task_dict[task_id].reward for task_id in unique_tasks_visited) - sum(task_dict[task_id].reward for task_id in unique_tasks_visited_without)
 
 
 # === DEC-MCTS HELPER FUNCTIONS ===

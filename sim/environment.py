@@ -31,8 +31,6 @@ class Environment:
         # divide hour by time step size to get number of steps
         self.time_steps = 60 / time_step_size
 
-        self.arrival_range = 1000  # TODO
-
         self.FLOW_MULTIPLIER = 1000  # TODO FLOW MAGNITUDE MODIFIER
 
         self.agent_loc_dict = agent_loc_dict
@@ -229,8 +227,12 @@ class Environment:
         x_max = max(self.cropped_coords["x"].values)
         y_min = min(self.cropped_coords["y"].values)
         y_max = max(self.cropped_coords["y"].values)
-
-        return ((x_min, x_max), (y_min, y_max))  # meters
+        if not self.SLICE:
+            z_min = min(self.cropped_coords["z"].values)
+            z_max = max(self.cropped_coords["z"].values)
+            return ((x_min, x_max), (y_min, y_max), (z_min, z_max))  # meters
+        else:
+            return ((x_min, x_max), (y_min, y_max), (0, 0))
 
     def step(self, agent_list):
         """
@@ -299,7 +301,6 @@ def make_environment_from_config(
     @returns: an Environment
     """
     # Load the environment configuration
-    # TODO remove step size from environment -instead to main
     with open(config_filepath, "r") as f:
         config = yaml.safe_load(f)
 
@@ -313,16 +314,17 @@ def make_environment_from_config(
 
         # Load in agents at starting locations
         agent_loc_dict = {}
-        for i in range(config["num_agents"]):
-            loc = list(config["start_loc"])
-            # Add coords plus some noise TODO - update noise input
+        for i in range(config["num_robots"]):
+            loc = list(config["base_loc"])
+            # Add coords plus some noise NOTE - maybe update noise input
             loc[0] = loc[0] + random.randint(10, 1000)
             loc[1] = loc[1] + random.randint(10, 1000)
             loc[2] = loc[2] + random.randint(10, 1000)
 
             agent_loc_dict[i] = loc
+        agent_loc_dict[config["m_id"]] = list(config["base_loc"])
 
-    # TODO Process folder of tidal filepaths into list
+    # TODO Process folder of tidal filepaths into list here once we start using time-varying environment
     tidal_fps = [tidal_folderpath]
 
     return Environment(

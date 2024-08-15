@@ -10,7 +10,7 @@ from solvers.graphing import *
 from solvers.masop_solver_config import (calculate_final_potential_reward,
                                          calculate_final_reward)
 from utils.logger import FileLogger, init_logger
-from utils.plotter import plot_mpc_results_from_log
+from utils.plotter import plot_results_from_log
 
 
 def get_args() -> Namespace:
@@ -229,7 +229,7 @@ if __name__ == "__main__":
                                     comms_mgr, pssngr_list, sim_config)
                                 fails += 1
 
-                # TODO Probability that new task is added to problem
+                # Probability that new task is added to problem
                 if "Hybrid2" in sim_config:
                     all_agents = pssngr_list[:] + [mothership]
                 else:
@@ -284,4 +284,4 @@ if __name__ == "__main__":
                     )
 
     print("filename:", file_logger.log_filename)
-    plot_mpc_results_from_log(file_logger.log_filename)
+    plot_results_from_log(file_logger.log_filename)

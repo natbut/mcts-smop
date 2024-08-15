@@ -24,18 +24,34 @@ class Message:
         self.delay = val
 
     # Also might want a class to modify success prob
+    def set_success_prob(self, val):
+        self.success_prob = val
 
 
 class CommsManager:
 
-    def __init__(self, env: Environment, agent_list) -> None:
+    def __init__(self,
+                 env: Environment,
+                 agent_list,
+                 max_range,
+                 decay_range,
+                 decay_range_m,
+                 max_success_prob,
+                 msg_decay_rate,
+                 m_id
+                 ) -> None:
+
         self.env = env
         self.agent_dict = {}
         for a in agent_list:
             self.agent_dict[a.id] = a
+        self.m_id = m_id
 
-        self.COMMS_RANGE = 10000  # TODO
-        self.COMMS_RATE = 100
+        self.DECAY_RANGE = decay_range
+        self.DECAY_RANGE_M = decay_range_m
+        self.MAX_SUCCESS_PROB = max_success_prob
+        self.MSG_DECAY_RATE = msg_decay_rate
+        self.MAX_COMMS_RANGE = max_range
 
         self.agent_comms_dict = {}
         self.update_connections()  # Form connections between agents
@@ -55,7 +71,7 @@ class CommsManager:
                     agent1_loc = np.array(self.env.agent_loc_dict[agent1])
                     agent2_loc = np.array(self.env.agent_loc_dict[agent2])
                     # Assign 1 if distance within range, 0 otherwise
-                    if np.linalg.norm(agent1_loc - agent2_loc) < self.COMMS_RANGE:
+                    if np.linalg.norm(agent1_loc - agent2_loc) < self.MAX_COMMS_RANGE:
                         agent_connections[agent2] = True
                     else:
                         agent_connections[agent2] = False
@@ -69,37 +85,49 @@ class CommsManager:
         """
         return self.agent_comms_dict[agent_id]
 
-    # Function to receive new messages for passing
-    # Called by agent to add a message to comms manager
     def add_message_for_passing(self, msg: Message):
+        # Function to receive new messages for passing
+        # Called by agent to add a message to comms manager
         # Process delay time
         agent1_loc = np.array(self.agent_dict[msg.sender_id].location)
         agent2_loc = np.array(self.agent_dict[msg.receiver_id].location)
         dist = np.linalg.norm(agent1_loc-agent2_loc)
-        # print("Message dist:", dist, " Message delay:", msg.delay)
-        msg.set_delay(math.ceil(dist/self.COMMS_RATE))
+
+        # NOTE Instead of delay, set success prob here
+        msg.set_delay(0)  # math.ceil(dist/self.COMMS_RATE))
+        if msg.sender_id == self.m_id or msg.receiver_id == self.m_id:
+            succ_prob = self.MAX_SUCCESS_PROB - \
+                (dist//self.DECAY_RANGE_M)*self.MSG_DECAY_RATE
+        else:
+            succ_prob = self.MAX_SUCCESS_PROB - \
+                (dist//self.DECAY_RANGE)*self.MSG_DECAY_RATE
+        msg.set_success_prob(max(0, succ_prob))
+
         # Add to active messages
         self.active_msgs.append(msg)
-
-    # function to manage message passing with each time step (considering delays, packet drop)
+        # NOTE This enforces instant delivery/failure. Update or remove if working with delays
+        while self.active_msgs:
+            self.step()
 
     def step(self):
-
+        # function to manage message passing with each time step (considering delays, packet drop)
         # Update message passing
-        for msg in self.active_msgs:
+        for i, msg in enumerate(self.active_msgs):
             # Reduce delay if message still passing
             if msg.delay > 0:
                 msg.set_delay(msg.delay - 1)
             # Else receive message
             else:
-                # TODO - maybe insert some probability that message is lost here
-                self.agent_dict[msg.receiver_id].receive_message(self, msg)
+                arrive_msg = self.active_msgs.pop(i)
+                # probability that message is lost
+                samp = np.random.random()
+                if samp <= msg.success_prob:
+                    # Remove & send received message
+                    self.agent_dict[msg.receiver_id].receive_message(
+                        self, arrive_msg)
 
-                # Remove received message
-                self.active_msgs.remove(msg)
-
-        # Update comms graph
-        self.update_connections()
+        # Update comms graph - handled in main sim
+        # self.update_connections()
 
 
 class CommsManager_Basic:

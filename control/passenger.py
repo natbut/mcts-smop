@@ -3,11 +3,10 @@ import random
 from copy import deepcopy
 
 import numpy as np
-import yaml
 
-from control.agent import Agent
-from sim.comms_manager import CommsManager_Basic
-from solvers.masop_solver_config import State
+from control.agent import Agent, load_data_from_config
+from sim.comms_manager import CommsManager
+from solvers.masop_solver_config import State, fast_simulation
 from solvers.my_DecMCTS import ActionDistribution, Tree
 
 # TODO: Think about how to share completed tasks between agents
@@ -18,13 +17,14 @@ class Passenger(Agent):
     TRAVELING = 1
     WORKING = 2
 
-    def __init__(self, id: int, solver_params: dict, sim_data: dict) -> None:
+    def __init__(self, id: int, solver_params: dict, sim_data: dict, merger_params: dict) -> None:
 
-        super().__init__(id, solver_params, sim_data)
+        super().__init__(id, solver_params, sim_data, merger_params)
 
         # Passenger scheduling & control variables
         self.event = True
-        self.schedule = None
+        self.expected_event = True
+        self.schedule = []
         self.initial_alloc_reward = 0
 
         # Passenger action variables
@@ -37,11 +37,10 @@ class Passenger(Agent):
 
     # === SCHEDULING FUNCTIONS ===
 
-    def update_my_best_action_dist(self,
-                                   new_act_dist: ActionDistribution, rel_thresh=0.99,
-                                   rel_mod=0.9,
-                                   sim_iters=10
-                                   ):
+    def _update_my_best_action_dist(self,
+                                    new_act_dist: ActionDistribution,
+                                    sim_iters=10
+                                    ):
         # Automatically use schedule if currently have no schedule
         if self.action[1] == "Init":
             # TODO? this might struggle in purely distributed as it always uses 1st state only
@@ -50,29 +49,18 @@ class Passenger(Agent):
             self.event = False
             # initial reward
             self.initial_alloc_reward = sum(
-                self.sim_data["graph"].rewards[v] for v in self.schedule)
+                self.sim_data["full_graph"].rewards[v] for v in self.schedule)
+
+            print("!! Schedule selected:", self.schedule, "\n")
             return
 
-        # NOTE consider a factor related to self.completed tasks that encourages early return with increasing numbers of completed tasks
-        # TODO Naive approach to safe return with perf thresh filter
-        # complete_tasks_reward = sum(
-        #     self.sim_data["graph"].rewards[v] for v in self.completed_tasks)
-        # if complete_tasks_reward/self.initial_alloc_reward > perf_thresh:
-        #     return_home_state = State(
-        #         [self.schedule[0], self.sim_data["end"]], self.sim_data["budget"])
-        #     self.my_action_dist = ActionDistribution([return_home_state], [1])
-        #     self.schedule = self.my_action_dist.best_action().action_seq[:]
-        #     self.event = False
-        #     return
-
         # Otherwise, distro
-        super().update_my_best_action_dist(new_act_dist,
-                                           rel_thresh,
-                                           rel_mod,
-                                           sim_iters)
+        super()._update_my_best_action_dist(new_act_dist,
+                                            sim_iters)
 
-    def optimize_schedule_distr(self, comms_mgr: CommsManager_Basic, agent_list, sim_config, rel_mod):
+    def optimize_schedule_distr(self, comms_mgr: CommsManager, sim_config):
 
+        # No optimization needed if no events or are dead
         if (not self.event) or self.dead or self.finished:
             return
 
@@ -82,40 +70,79 @@ class Passenger(Agent):
             self.event = False
             return
 
+        # Evaluate remaining schedule. If failure risk is low then do not optimize
+        # NOTE I expect that this will improve performance in low-disturbance situations. However, when robots fail or new tasks are added we would like to mandate that an update happens and skip this check.
+        if self.expected_event and "Dist" not in sim_config:
+            route_as_edges = [(self.schedule[i], self.schedule[i+1])
+                              for i in range(len(self.schedule)-1)]
+            _, rel = fast_simulation(
+                route_as_edges, self.sim_data["full_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])
+            if rel > self.merger_params["rel_thresh"]:
+                self.event = False
+                return
+
+        # Send schedule request
+        if "Hybrid2" in sim_config:
+            content = ("Schedule Request",
+                       self.sim_data["budget"],
+                       self.sim_data["start"],
+                       self.schedule,
+                       )
+
+            self.send_message(comms_mgr,
+                              self.sim_data["m_id"],
+                              content)
+
+        print("! Optimizing schedule")
+
         # Load search tree
         data = self.solver_params
+        # print("Generating graph...")
+        self.sim_data["graph"] = self.generate_graph(
+            self.sim_data["start"], self.sim_data["end"])
+        data["task_dict"] = self.task_dict
         data["graph"] = self.sim_data["graph"]
         data["start"] = self.sim_data["start"]
         data["end"] = self.sim_data["end"]
         data["budget"] = self.sim_data["budget"]
+        print("Distr planning with", data["graph"].vertices)
 
         tree = Tree(data,
                     comm_n=self.solver_params["comm_n"],
                     robot_id=self.id)
 
         tree.comms = self.stored_act_dists
-
+        # print("Solving...")
         # Optimize schedule to get action dist of candidate schedules
         for _ in range(self.solver_params["plan_iters"]):
             # Alg1. GROW TREE & UPDATE DISTRIBUTION
             tree.grow()
+            # print("Iter complete, doing comms...")
             # NOTE removed comms stuff here because unrealistic. Handling elsewhere.
-            # TODO testing with comms exchange added back in...
-            for target in agent_list:
-                if target.id != self.id:
+            # TODO testing with comms exchange removed during planning
+            content = ("initiate", tree.my_act_dist)
+            for target in self.neighbors_status:
+                if self.neighbors_status[target]:
                     self.send_message(comms_mgr,
-                                      target.id,
+                                      target,
                                       ("initiate", tree.my_act_dist))
 
         # Evaluate candidate solutions against current stored elites, reduce to subset of size n_comms, select best act sequence from elites as new schedule
         # NOTE only need to do this type of solution merge if hybrid
         if "Hybrid" in sim_config:
-            self.update_my_best_action_dist(tree.my_act_dist, rel_mod=rel_mod)
+            self._update_my_best_action_dist(tree.my_act_dist)
             # Send updated distro to M for use in scheduling other robots
+            content = ("Update", self.my_action_dist)
             self.send_message(
-                comms_mgr, self.sim_data["m_id"], ("Update", self.my_action_dist))
+                comms_mgr, self.sim_data["m_id"], content)
         else:  # For distributed-only
             self.my_action_dist = tree.my_act_dist
+
+        # Send new action dist to other agents
+        content = ("Update", self.my_action_dist)
+        for target in self.neighbors_status:
+            if self.neighbors_status[target]:
+                self.send_message(comms_mgr, target, content)
 
         # Select schedule to be used by agent
         self.schedule = self.my_action_dist.best_action().action_seq[:]
@@ -123,13 +150,6 @@ class Passenger(Agent):
 
         # Remove event flag once schedule is updated
         self.event = False
-
-        # Send new action dist to other agents
-        for target in agent_list:
-            if target.id != self.id:
-                self.send_message(comms_mgr,
-                                  target.id,
-                                  ("Update", self.my_action_dist))
 
     # === ACTIONS ===
 
@@ -140,58 +160,52 @@ class Passenger(Agent):
         # print("Passenger", self.id, " Current action:",
         #       self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
         # ("IDLE", -1)
+
         # === BREAKING CRITERIA ===
         # If out of energy, don't do anything
         if self.sim_data["budget"] < 0 and not self.finished:
             self.action[0] = self.IDLE
             self.dead = True
-            # print("Agent", self.id, " Updated action:",
-            #       self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
             return
 
         # If home and idle with no schedule, do nothing
         if (self.action[0] == self.IDLE
                 and self.action[1] == self.sim_data["end"]):
             self.finished = True
-            # print("Agent", self.id, " Updated action:",
-            #       self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
             return
 
         # If waiting for init schedule command from comms
         if len(self.schedule) == 0 and self.action[1] == "Init":
-            # print("Agent", self.id, " Updated action:",
-            #       self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
-            return
+            if self.my_action_dist != None:
+                self.schedule = self.my_action_dist.best_action().action_seq[:]
+            else:
+                return
 
-        # TODO some tours end with [vg] in schedule. Are these robots dead? Is there a logic error here?
         if self.action[0] == self.IDLE and len(self.schedule) > 0:
             # Start tour & remove first element from schedule
             self.action[0] = self.TRAVELING
             leaving = self.schedule.pop(0)
+            self.task_dict[leaving].complete = True
             self.action[1] = self.schedule[0]
-            edge = (leaving, self.action[1])
 
             # NOTE remove first action (step) from each possible seq
-            for state in self.my_action_dist.X:
-                state.action_seq.pop(0)
+            # Handled by optimize_distr
+            # for state in self.my_action_dist.X:
+            #     state.action_seq.pop(0)
 
             if self.sim_data["basic"]:
+                edge = (leaving, self.action[1])
                 # print(self.id, "Traveling to new task on edge", edge)
-                # if "Stoch" in sim_config:
-                #     self.travel_remaining = true_graph.sample_edge_stoch(
-                #         edge)
-                # else:
                 self.travel_remaining = true_graph.get_edge_mean(edge)
-                # print("remove", leaving, " from graph verts:",
-                #       self.sim_data["graph"].vertices)
+
                 if leaving in self.sim_data["graph"].vertices:
                     self.sim_data["graph"].vertices.remove(leaving)
                     if leaving not in self.completed_tasks:
                         self.completed_tasks.append(leaving)
                 self.sim_data["graph"].edges.remove(edge)
-                self.sim_data["start"] = self.action[1]
-                # print(self.id, "Traveling to",
-                #   self.action[1], " with time", self.travel_remaining, " | Rem. Energy:", self.energy)
+
+            # self.task_dict[leaving].complete = True  # Mark task complete
+            self.sim_data["start"] = self.action[1]
 
         task = self.task_dict[self.action[1]]
         arrived = False
@@ -200,13 +214,15 @@ class Passenger(Agent):
         if self.action[0] == self.TRAVELING:
             # print(self.id, "Travel in progress...")
             if self.sim_data["basic"]:
+                # Travel progress for basic
                 self.travel_remaining -= self.sim_data["velocity"]
                 if self.travel_remaining <= 0:
                     arrived = True
             else:
+                # Travel progress for ocean sim
                 self.update_position_mod_vector()
                 arrived = self.env_model.check_location_within_threshold(
-                    self.location, task.location, self.THRESHOLD
+                    self.location, task.location, self.ARRIVAL_THRESH
                 )
 
         # 1) If traveling and arrived at task, begin work
@@ -218,12 +234,17 @@ class Passenger(Agent):
         # 2) If working and work is complete, become Idle
         if self.action[0] == self.WORKING and self.work_remaining <= 0:
             # print(self.id, "Work complete, becoming Idle")
+            self.expected_event = True
             self.event = True
             self.action[0] = self.IDLE
+            # Mark task complete
             self.completed_tasks.append(self.action[1])
+            self.task_dict[self.action[1]].complete = True
+            self.sim_data["start"] = self.action[1]
             content = ("Complete Task", self.action[1])
             self.broadcast_message(comms_mgr, agent_list, sim_config, content)
 
+        # 3) Otherwise continue doing work
         elif self.action[0] == self.WORKING and self.work_remaining > 0:
             # otherwise, continue working
             # print(self.id, "Work in progress")
@@ -256,6 +277,12 @@ class Passenger(Agent):
         content = ("Update", self.my_action_dist)
 
         self.broadcast_message(comms_mgr, agent_list, sim_config, content)
+
+    def failure_update(self, comms_mgr, agent_list, sim_config):
+        if self.dead:
+            content = ("Update", self.my_action_dist)
+
+            self.broadcast_message(comms_mgr, agent_list, sim_config, content)
 
     def random_failure(self, comms_mgr, agent_list, sim_config, robot_fail_prob=0.0):
         """
@@ -290,26 +317,14 @@ class Passenger(Agent):
             if "Hybrid" in sim_config:
                 self.send_message(comms_mgr, -1, content)
 
-    def reduce_energy_basic(self):
-        if self.action[0] != self.IDLE:
-            self.sim_data["budget"] -= 1
-
-    def reduce_energy_by_vel(self, vel_mag):
-        """
-        Given a velocity, reduce energy for 1 timestep of holding
-        that velocity
-
-        @param vel_mag: commanded velocity m/timestep
-        """
-        self.sim_data["budget"] -= self.energy_burn_rate * vel_mag
-
     def update_position_mod_vector(self):
         if self.sim_data["basic"]:
             print("No pos vector because basic sim")
             return
 
         dest_loc = self.task_dict[self.action[1]].location
-        vector = self.env_model.get_scaled_travel_vector(
+        # Get modification to position assuming travel at constant velocity
+        vector = self.env_model.generate_scaled_travel_vector(
             self.location, dest_loc, self.sim_data["velocity"]
         )
         self.position_mod_vector = vector
@@ -322,7 +337,10 @@ class Passenger(Agent):
         if self.sim_data["basic"]:
             print("No target loc because basic sim")
             return
-        return self.task_dict[self.action[1]].location
+        if self.action[1] == "Init":
+            return self.location
+        else:
+            return self.task_dict[self.action[1]].location
 
     def get_command_velocity(self):
         """
@@ -335,7 +353,7 @@ class Passenger(Agent):
         # print("Position Mod:", self.position_mod_vector)
         # print("Local flow:", self.flow)
         cmd_vel = tuple(
-            self.position_mod_vector[i] - self.flow[i] for i in range(len(self.flow))
+            self.position_mod_vector[i] - self.local_flow[i] for i in range(len(self.local_flow))
         )
         resultant_cmd_vel = round(
             math.sqrt(cmd_vel[0] ** 2 + cmd_vel[1] ** 2), 2)
@@ -343,72 +361,57 @@ class Passenger(Agent):
         return resultant_cmd_vel
 
 
-def generate_passengers_with_data(solver_params, sim_data) -> list[Passenger]:
+def generate_passengers_with_data(solver_params, sim_data, merger_params) -> list[Passenger]:
     pssngr_list = []
     for i in range(solver_params["num_robots"]):
         p = Passenger(i,
                       solver_params=deepcopy(solver_params),
-                      sim_data=deepcopy(sim_data)
+                      sim_data=deepcopy(sim_data),
+                      merger_params=deepcopy(merger_params)
                       )
-        for v in sim_data["graph"].vertices:
-            p.load_task(v, None, sim_data["graph"].works[v])
+        # for v in sim_data["graph"].vertices:
+        #     p.load_task(v, None, sim_data["graph"].works[v])
         pssngr_list.append(p)
     return pssngr_list
 
 
 def generate_passengers_from_config(solver_config_fp,
                                     problem_config_fp,
-                                    planning_graph) -> list[Passenger]:
+                                    # planning_graph
+                                    ) -> list[Passenger]:
 
-    with open(problem_config_fp, "r") as p_fp:
-        prob_config = yaml.safe_load(p_fp)
-        with open(solver_config_fp, "r") as s_fp:
-            solve_config = yaml.safe_load(s_fp)
+    sim_data, dec_mcts_data, _, merger_data = load_data_from_config(
+        solver_config_fp, problem_config_fp)
 
-            sim_data = {"graph": deepcopy(planning_graph),
-                        "start": prob_config["start"],
-                        "end": prob_config["end"],
-                        "budget": prob_config["budget"],
-                        "velocity": prob_config["velocity"],
-                        "basic": prob_config["basic"],
-                        "m_id": prob_config["m_id"]
-                        }
-
-            dec_mcts_data = {"num_robots": prob_config["num_robots"],
-                             "fail_prob": solve_config["failure_probability"],
-                             "comm_n": solve_config["comm_n"],
-                             "plan_iters": solve_config["planning_iters"]
-                             }
-
-    return generate_passengers_with_data(dec_mcts_data, sim_data)
+    return generate_passengers_with_data(dec_mcts_data, sim_data, merger_data)
 
 
-def generate_passengers_for_OceanSim(config_filepath) -> list[Passenger]:
+# def generate_passengers_for_OceanSim(config_filepath) -> list[Passenger]:
 
-    pssngr_list = []
+#     pssngr_list = []
 
-    with open(config_filepath, "r") as f:
-        config = yaml.safe_load(f)
+#     with open(config_filepath, "r") as f:
+#         config = yaml.safe_load(f)
 
-        # Environment dimensions for agent models
-        dims = (
-            tuple(config["xCoordRange"]),
-            tuple(config["yCoordRange"]),
-            tuple(config["zCoordRange"]),
-        )
+#         # Environment dimensions for agent models
+#         dims = (
+#             tuple(config["xCoordRange"]),
+#             tuple(config["yCoordRange"]),
+#             tuple(config["zCoordRange"]),
+#         )
 
-        # Create agents
-        for i in range(config["num_agents"]):
-            p = Passenger(
-                i, config["energy"], dims, config["start_loc"], config["velocity"]
-            )
-            # Load tasks
-            for task in config["tasks"]:
-                for key in task.keys():
-                    p.load_task(key, task[key]["loc"], task[key]["work"])
+#         # Create agents
+#         for i in range(config["num_agents"]):
+#             p = Passenger(
+#                 i, config["energy"], dims, config["start_loc"], config["velocity"]
+#             )
+#             # Load tasks
+#             for task in config["tasks"]:
+#                 for key in task.keys():
+#                     p.load_task(key, task[key]["loc"], task[key]["work"])
 
-            p.load_task(-1, config["start_loc"], 0)  # load "home" task
+#             p.load_task(-1, config["start_loc"], 0)  # load "home" task
 
-            pssngr_list.append(p)
+#             pssngr_list.append(p)
 
-    return pssngr_list
+#     return pssngr_list

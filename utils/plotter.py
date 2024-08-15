@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 
-def plot_mpc_results_from_log(log_fp):
+def plot_results_from_log(log_fp):
     """
     Plots the results of simulation from given log file.
 
@@ -21,7 +21,10 @@ def plot_mpc_results_from_log(log_fp):
     df = pd.read_csv(log_fp)
 
     trial = df["trial"]
-    best = df["best"]
+    try:
+        best = df["best"]
+    except:
+        best = False
     frontEndOnly = df[[
         col for col in df.columns if "frontEndOnly" in col]].values
     distrOnly = df[[
@@ -53,9 +56,11 @@ def plot_results(trial,
                  title="Results",
                  figname="Fig"
                  ):
+    print("BEST", best)
 
     # Mean Rewards
-    best_rew = round(np.mean(best), 2)
+    if best:
+        best_rew = round(np.mean(best), 2)
     frontEnd_rew = round(np.mean([res[0] for res in frontEnd_results]), 2)
     distrOnly_rew = round(np.mean([res[0] for res in distrOnly_results]), 2)
     twoPart_rew = round(np.mean([res[0] for res in twoPart_results]), 2)
@@ -73,7 +78,8 @@ def plot_results(trial,
 
     # StdErr
     # Rewards
-    best_se = np.std(best) / np.sqrt(len(best))
+    if best:
+        best_se = np.std(best) / np.sqrt(len(best))
     frontEnd_rew_se = np.std([res[0] for res in frontEnd_results]) / \
         np.sqrt(len(frontEnd_results))
     distrOnly_rew_se = np.std([res[0] for res in distrOnly_results]) / \
@@ -107,9 +113,14 @@ def plot_results(trial,
         "Tasks Returned": (avg_rew, error_rew),
     }
 
-    labels = ["Best", "Front-End Only",
-              "Distr. Only", "Front End\n+ Dist Replan",
-              "Front End\n+ Hybrid Replan"]
+    if best:
+        labels = ["Best", "Front-End Only",
+                  "Distr. Only", "Front End\n+ Dist Replan",
+                  "Front End\n+ Hybrid Replan"]
+    else:
+        labels = ["Front-End Only",
+                  "Distr. Only", "Front End\n+ Dist Replan",
+                  "Front End\n+ Hybrid Replan"]
 
     # Plot results
     fig, ax = plt.subplots()
@@ -118,13 +129,17 @@ def plot_results(trial,
     x = np.arange(len(labels))
     width = 0.3
     multiplier = 0
-    rects = ax.bar(
-        x[0]+(width/2), best_rew, width, yerr=best_se,  label="Best")
-    ax.bar_label(rects, padding=3)
+    if best:
+        rects = ax.bar(x[0]+(width/2), best_rew, width,
+                       yerr=best_se,  label="Best")
+        ax.bar_label(rects, padding=3)
+        start = x[1:]
+    else:
+        start = x
 
     for attribute, measurements in rew_content.items():
         offset = width * multiplier
-        x_temp = x[1:] + offset
+        x_temp = start + offset
         rects = ax.bar(
             x_temp, measurements[0], width, yerr=measurements[1],  label=attribute)
         ax.bar_label(rects, padding=3)

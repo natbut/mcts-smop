@@ -3,16 +3,19 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 
+from control.task import Task
 
 # Environment model as lattice graph, where each node contains
+
+
 class EnvironmentModel:
-    def __init__(self, y_dim, x_dim, mean=0, variance=1):
+    def __init__(self, y_dim, x_dim, mean=0, variance=0):
         self.rows = y_dim
         self.cols = x_dim
         # Initialize the lattice with vectors (x, y) where both x and y are normally distributed
         # np.random.normal(mean, variance, (rows, cols, 2))
-        self.means = np.full((self.rows, self.cols, 2), mean, dtype=float)
-        self.variances = np.full(
+        self.vec_means = np.full((self.rows, self.cols, 2), mean, dtype=float)
+        self.vec_vars = np.full(
             (self.rows, self.cols, 2), variance, dtype=float)
 
     def apply_observation(self, observation: tuple):
@@ -27,11 +30,13 @@ class EnvironmentModel:
         obs_x, obs_y = flow_comps
 
         # Update the mean and variance at the observed cell
-        self.means[x, y] = np.asarray([obs_x, obs_y], dtype=float)
-        self.variances[x, y] = np.asarray([0, 0], dtype=float)
+        self.vec_means[x, y] = np.asarray([obs_x, obs_y], dtype=float)
+        self.vec_vars[x, y] = np.asarray([0, 0], dtype=float)
 
         # Propagate the mean and variance to the neighboring cells
         self._propagate(x, y)
+
+        # self.visualize()
 
     # TODO propagate beyond just neighboring cells
     def _propagate(self, x, y):
@@ -49,10 +54,10 @@ class EnvironmentModel:
             if 0 <= nx < self.rows and 0 <= ny < self.cols:
                 # Update the mean and variance of the neighboring cell
                 # TODO round these here in attempt to fix overflow error
-                self.means[nx, ny] = (
-                    self.means[nx, ny] + self.means[x, y]) / 2
-                self.variances[nx, ny] = (
-                    self.variances[nx, ny] + self.variances[x, y]) / 2
+                self.vec_means[nx, ny] = (
+                    self.vec_means[nx, ny] + self.vec_means[x, y]) / 2
+                self.vec_vars[nx, ny] = (
+                    self.vec_vars[nx, ny] + self.vec_vars[x, y]) / 2
 
     # Converts from location units (m) to model coordinates
     def convert_location_to_model_coord(self, dim_ranges, location):
@@ -74,10 +79,12 @@ class EnvironmentModel:
 
         return x_model, y_model
 
-    def get_scaled_travel_vector(self, start_loc, end_loc, agent_velocity):
+    def generate_scaled_travel_vector(self,
+                                      start_loc,
+                                      end_loc,
+                                      agent_velocity):
         """
-        Find the expected position vector traversed by an agent over one time step given start
-        and end locations
+        Find the expected position vector traversed by an agent over one time step given start and end locations
 
         @param start_loc: starting location (environment units)
         @param end_loc: ending location (environment units)
@@ -113,13 +120,10 @@ class EnvironmentModel:
                 arrived = False
         return arrived
 
-    # TODO estimate travel distance of directed edge between two locations
-    def get_travel_cost_distribution(self, loc1, loc2, env_dim_ranges, agent_vel):
+    # TODO? estimate travel distance of directed edge between two locations
+    def get_travel_dist_distribution(self, loc1, loc2, env_dim_ranges, agent_vel, disp=False):
         """
-
-        @returns (travel_vec, mean_sum, var_sum) where travel_vec is euclidean distance between
-        locations, mean_sum and var_sum are normal distribution components of expected flows acting
-        against agent along travel path
+        @returns (distance_mean, distance_variation)
         """
         # Sum the means and sum the variances
         THRESHOLD = 1000  # TODO
@@ -128,19 +132,22 @@ class EnvironmentModel:
         travel_vec = np.subtract(loc1, loc2)
         # 1) Get the position vector for agent displacement with one time step
         agent_travel_vec = np.array(
-            self.get_scaled_travel_vector(loc1, loc2, agent_vel))
+            self.generate_scaled_travel_vector(loc1, loc2, agent_vel))
 
         # 2) Starting from location 1, move to location 2 and sum means & variances of flow vectors
         current_env_loc = np.array(loc1)
         current_model_loc = self.convert_location_to_model_coord(
             env_dim_ranges, current_env_loc)
-        mean_flow_sum = self.means[current_model_loc[1],
-                                   current_model_loc[0]]  # y,x for row, col
-        var_sum = self.variances[current_model_loc[1], current_model_loc[0]]
+        flow_means_sum = list(self.vec_means[current_model_loc[1],
+                                             current_model_loc[0]])  # y,x for row, col
+        flow_vars_sum = list(self.vec_vars[current_model_loc[1],
+                                           current_model_loc[0]])
         # print("init mean_sum, var_sum:", mean_flow_sum, var_sum)
 
         end_reached = False
         timesteps = 1
+        if disp:
+            print("Start")
         while not end_reached:
             current_env_loc = current_env_loc + agent_travel_vec
             # print("Agent current loc in env:", current_env_loc)
@@ -148,28 +155,37 @@ class EnvironmentModel:
                 env_dim_ranges, current_env_loc)
             # print("Agent current loc in model:", current_model_loc)
             # y,x for row, col
-            mean_flow_sum += self.means[current_model_loc[1],
-                                        current_model_loc[0]]
-            var_sum += self.variances[current_model_loc[1],
-                                      current_model_loc[0]]
+            if disp:
+                print("Adding", self.vec_means[current_model_loc[1],
+                                               current_model_loc[0]], " to", flow_means_sum)
+            flow_means_sum += self.vec_means[current_model_loc[1],
+                                             current_model_loc[0]][:]
+            flow_vars_sum += self.vec_vars[current_model_loc[1],
+                                           current_model_loc[0]][:]
 
             end_reached = self.check_location_within_threshold(
                 current_env_loc, loc2, THRESHOLD)
             # print(mean_flow_sum, var_sum)
             timesteps += 1
 
-        # print("final mean_sum, var_sum:", mean_flow_sum, var_sum)
-        mean_dist_sum = mean_flow_sum * timesteps
-        # print("mean distance sum", mean_dist_sum)
+        # print("\nfinal FLOW mean_sum, var_sum:", flow_means_sum, flow_vars_sum)
+        # Get mean by div sum by timesteps, then multiply vel vector by timesteps to get position vector. So timesteps cancel.
+        avg_flow_vec_posMod_mean = flow_means_sum  # /timesteps * timesteps
+        avg_flow_vec_posMod_var = flow_vars_sum  # /timesteps * timesteps
+        pos_change_vec = travel_vec[:2] + avg_flow_vec_posMod_mean
 
-        return (travel_vec, mean_dist_sum, var_sum)
+        dist_mean = round(np.linalg.norm(pos_change_vec), 2)
+        dist_var = round(np.linalg.norm(avg_flow_vec_posMod_var), 2)
+
+        return dist_mean, dist_var
 
     def visualize(self):
         X, Y = np.meshgrid(np.arange(self.cols), np.arange(self.rows))
-        U = self.means[:, :, 0]
-        V = self.means[:, :, 1]
+        U = self.vec_means[:, :, 0]
+        V = self.vec_means[:, :, 1]
 
-        scale = max([abs(np.max(self.means)), abs(np.min(self.means))])  # 2
+        scale = max([abs(np.max(self.vec_means)),
+                    abs(np.min(self.vec_means))])  # 2
 
         plt.figure(figsize=(12, 6))
         plt.quiver(X, Y, U, V, angles='xy', scale_units='xy', scale=scale)
@@ -181,35 +197,6 @@ class EnvironmentModel:
         plt.title('2D Lattice with Vector Observations')
         plt.grid()
         plt.show()
-
-
-class TaskNode:
-    # NOTE Potentially make seperate function for representing environment model as graph with stochastic edges
-    def __init__(self, id: int, location: tuple, work: int) -> None:
-        self.id = id
-        self.location = location
-        self.work = work
-        self.distances_to_tasks = {}  # Normal distribution edge costs
-        self.complete = False
-
-    def set_distance_to_neighbor(self, task_id, distance_vec, mean, variance):
-        """
-        Define distance to task with euclidean distance, plus an additional distance
-        component sampled from distribution resulting from flow field
-        """
-        self.distances_to_tasks[task_id] = (distance_vec, mean, variance)
-
-    def sample_distance_to_neighbor(self, task_id):
-        """
-        @returns distance (m) from this task to input neighbor location
-        """
-        sampled_comps = np.random.normal(self.distances_to_tasks[task_id][1],
-                                         self.distances_to_tasks[task_id][2]
-                                         )
-        # mod for 3D case
-        distance_comp_sample = self.distances_to_tasks[task_id][0][:2] + sampled_comps
-
-        return np.linalg.norm(distance_comp_sample)
 
 
 if __name__ == "__main__":

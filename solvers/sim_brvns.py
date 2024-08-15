@@ -1,5 +1,6 @@
 import math
 import random
+import time as tm
 from copy import deepcopy
 
 import numpy as np
@@ -209,9 +210,10 @@ def BRVNS(initial_solution,
     k = k_initial
     T = 1000
     lamb = 0.99  # 0.999
-    time = 0
+    start_time = tm.time()
+    elapsed_time = 0
     # Phase 1 processing
-    while time <= t_max:  # TODO introduce timeout
+    while elapsed_time <= t_max:  # TODO introduce timeout
         k = k_initial  # degree of shaking destruction (1%-100%)
         while k <= k_max:
             # print("== TIME STEP", time, " ==")
@@ -256,11 +258,11 @@ def BRVNS(initial_solution,
                     k = k_initial
                 else:
                     k += 1
+            # Update prob parameter (cooling)
             T = T*lamb
 
-            # TODO - set up actual time-based timeout
-            time += 1
-            if time >= t_max:
+            elapsed_time = tm.time() - start_time
+            if elapsed_time > t_max:
                 break
 
     # Phase 2 processing
@@ -296,10 +298,10 @@ def shake(solution, k, k_max, graph: Graph, budget, start, end, alpha, beta):
     # Remove nodes/edges currently in new_solution from shake graph
     for route in new_solution:
         for i, vert in enumerate(route):
-            if vert != "vs" and vert != "vg":  # TODO do this right
+            if vert != route[0] and vert != route[-1]:  # TODO do this right
                 shake_graph.vertices.remove(vert)
-            if i != len(route)-1:
-                shake_graph.edges.remove((vert, route[i+1]))
+            # elif i != len(route)-1:
+            #     shake_graph.edges.remove((vert, route[i+1]))
     # Merge solutions
     new_solution = constructive_heuristic(
         shake_graph, budget, num_to_remove, start, end, alpha, beta) + new_solution

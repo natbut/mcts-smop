@@ -1,0 +1,46 @@
+# PROBLEM PARAMETERS
+
+problem_size: 25
+reward_range:
+  - 1 # min
+  - 10 # max
+work_range:
+  - 0 # min
+  - 0 # max
+c: 0.75  # variance modifier (0.05=low, 0.25=med, 0.75=high)
+start: 'vs'
+end: 'vg'
+
+m_id: -1
+
+basic: False
+
+# PASSENGER PARAMETERS
+
+num_robots: 4
+budget: 3000 #Wh (robot energy)
+energy_burn_rate: 0.01 # Wh / (m/s)
+velocity: 1000 #m/timeUnit
+base_loc: # approx starting/ending loc
+  - -85000 #X
+  - 120000 #Y
+  - 25 #z
+
+
+# ENVIRONMENT PARAMETERS
+
+xCoordRange:
+  - 100 # X start
+  - 195 # X end
+
+yCoordRange:
+  - 22 # Y start
+  - 65 # Y end
+
+zCoordRange:
+  - 25 # Z start
+  - 25 # Z end
+
+xThin: 1
+yThin: 1
+zThin: 1

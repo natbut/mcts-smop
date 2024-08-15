@@ -1,5 +1,27 @@
 
-from utils.plotter import plot_mpc_results_from_log
+from argparse import ArgumentParser, Namespace
 
-filepath = "logs/2024-08-06-13-46-06.csv"
-plot_mpc_results_from_log(filepath)
+from utils.plotter import plot_results_from_log
+
+
+def get_args() -> Namespace:
+    """Parse the script arguments.
+
+    Returns:
+        The parsed argument namespace.
+    """
+    parser = ArgumentParser()
+
+    parser.add_argument(
+        "data_file",
+        type=str,
+        help="Path to the data file",
+    )
+
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = get_args()
+    filepath = args.data_file
+    plot_results_from_log(filepath)
