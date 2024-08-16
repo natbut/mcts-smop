@@ -22,8 +22,6 @@ class Passenger(Agent):
         super().__init__(id, solver_params, sim_data, merger_params)
 
         # Passenger scheduling & control variables
-        self.event = True
-        self.expected_event = True
         self.schedule = []
         self.initial_alloc_reward = 0
 
@@ -38,8 +36,7 @@ class Passenger(Agent):
     # === SCHEDULING FUNCTIONS ===
 
     def _update_my_best_action_dist(self,
-                                    new_act_dist: ActionDistribution,
-                                    sim_iters=10
+                                    new_act_dist: ActionDistribution
                                     ):
         # Automatically use schedule if currently have no schedule
         if self.action[1] == "Init":
@@ -48,15 +45,15 @@ class Passenger(Agent):
             self.schedule = self.my_action_dist.best_action().action_seq[:]
             self.event = False
             # initial reward
-            self.initial_alloc_reward = sum(
-                self.sim_data["full_graph"].rewards[v] for v in self.schedule)
+            # self.initial_alloc_reward = sum(
+            #     self.sim_data["full_graph"].rewards[v] for v in self.schedule)
 
             print("!! Schedule selected:", self.schedule, "\n")
             return
 
         # Otherwise, distro
         super()._update_my_best_action_dist(new_act_dist,
-                                            sim_iters)
+                                            )
 
     def optimize_schedule_distr(self, comms_mgr: CommsManager, sim_config):
 
@@ -72,14 +69,26 @@ class Passenger(Agent):
 
         # Evaluate remaining schedule. If failure risk is low then do not optimize
         # NOTE I expect that this will improve performance in low-disturbance situations. However, when robots fail or new tasks are added we would like to mandate that an update happens and skip this check.
+
         if self.expected_event and "Dist" not in sim_config:
-            route_as_edges = [(self.schedule[i], self.schedule[i+1])
-                              for i in range(len(self.schedule)-1)]
+            # [[(self.schedule[i], self.schedule[i+1])
+            route_as_edges = [self.schedule]
+            #   for i in range(len(self.schedule)-1)]]
+            # print("Route check 1:", route_as_edges)
+            planning_task_dict = deepcopy(self.task_dict)
+            planning_task_dict[self.sim_data["start"]].location = self.location
+            self.sim_data["plan_graph"] = self.generate_graph(planning_task_dict, self.sim_data["start"], self.sim_data["end"],
+                                                              filter=True)
+
             _, rel = fast_simulation(
-                route_as_edges, self.sim_data["full_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])
+                route_as_edges, self.sim_data["plan_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])
+
             if rel > self.merger_params["rel_thresh"]:
                 self.event = False
+                print("Optimization not required")
                 return
+
+        print("\n! Optimizing schedule")
 
         # Send schedule request
         if "Hybrid2" in sim_config:
@@ -87,25 +96,27 @@ class Passenger(Agent):
                        self.sim_data["budget"],
                        self.sim_data["start"],
                        self.schedule,
+                       self.location
                        )
 
             self.send_message(comms_mgr,
                               self.sim_data["m_id"],
                               content)
-
-        print("! Optimizing schedule")
-
         # Load search tree
         data = self.solver_params
         # print("Generating graph...")
-        self.sim_data["graph"] = self.generate_graph(
-            self.sim_data["start"], self.sim_data["end"])
+        planning_task_dict = deepcopy(self.task_dict)
+        planning_task_dict[self.sim_data["start"]].location = self.location
+        self.sim_data["plan_graph"] = self.generate_graph(planning_task_dict,
+                                                          self.sim_data["start"], self.sim_data["end"],
+                                                          filter=True)
         data["task_dict"] = self.task_dict
-        data["graph"] = self.sim_data["graph"]
+        data["graph"] = self.sim_data["plan_graph"]
         data["start"] = self.sim_data["start"]
         data["end"] = self.sim_data["end"]
         data["budget"] = self.sim_data["budget"]
-        print("Distr planning with", data["graph"].vertices)
+
+        print("Distr scheduling with", data["graph"].vertices)
 
         tree = Tree(data,
                     comm_n=self.solver_params["comm_n"],
@@ -119,7 +130,7 @@ class Passenger(Agent):
             tree.grow()
             # print("Iter complete, doing comms...")
             # NOTE removed comms stuff here because unrealistic. Handling elsewhere.
-            # TODO testing with comms exchange removed during planning
+            # TODO test with comms exchange removed during planning
             content = ("initiate", tree.my_act_dist)
             for target in self.neighbors_status:
                 if self.neighbors_status[target]:
@@ -141,7 +152,7 @@ class Passenger(Agent):
         # Send new action dist to other agents
         content = ("Update", self.my_action_dist)
         for target in self.neighbors_status:
-            if self.neighbors_status[target]:
+            if self.neighbors_status[target] and target != self.sim_data["m_id"]:
                 self.send_message(comms_mgr, target, content)
 
         # Select schedule to be used by agent
@@ -150,6 +161,7 @@ class Passenger(Agent):
 
         # Remove event flag once schedule is updated
         self.event = False
+        self.expected_event = True
 
     # === ACTIONS ===
 
@@ -234,7 +246,6 @@ class Passenger(Agent):
         # 2) If working and work is complete, become Idle
         if self.action[0] == self.WORKING and self.work_remaining <= 0:
             # print(self.id, "Work complete, becoming Idle")
-            self.expected_event = True
             self.event = True
             self.action[0] = self.IDLE
             # Mark task complete
@@ -274,13 +285,12 @@ class Passenger(Agent):
         # NOTE communicates that failure has occurred
         # Send out an empty action distro to all agents and mothership
         self.my_action_dist = ActionDistribution([State([], -1)], [1])
-        content = ("Update", self.my_action_dist)
-
+        content = "Dead"
         self.broadcast_message(comms_mgr, agent_list, sim_config, content)
 
     def failure_update(self, comms_mgr, agent_list, sim_config):
         if self.dead:
-            content = ("Update", self.my_action_dist)
+            content = "Dead"
 
             self.broadcast_message(comms_mgr, agent_list, sim_config, content)
 

@@ -1,4 +1,6 @@
 
+from copy import deepcopy
+
 import numpy as np
 import yaml
 
@@ -7,7 +9,7 @@ from control.task import Task
 from sim.comms_manager import CommsManager, Message
 from sim.environment import Environment
 from solvers.graphing import generate_graph_from_model
-from solvers.masop_solver_config import State, fast_simulation
+from solvers.masop_solver_config import State, fast_simulation, sim_util_reward
 from solvers.my_DecMCTS import ActionDistribution
 
 
@@ -20,6 +22,9 @@ class Agent:
         self.solver_params = solver_params
         self.merger_params = merger_params
         self.travel_remaining = 0
+
+        self.event = True
+        self.expected_event = True
 
         if not sim_data["basic"]:
             # Environment status
@@ -66,14 +71,13 @@ class Agent:
                         state.action_seq.pop(0)
                         v = state.action_seq[0]
                     # NOTE budgets updated here?
-                    state.remaining_budget = self.sim_data["budget"]
+                    # state.remaining_budget = self.sim_data["budget"]
                     states.append(state)
         return states
 
     # TODO this function should be moved to passengers because it uses self.schedule
     def _update_my_best_action_dist(self,
-                                    new_act_dist: ActionDistribution,
-                                    sim_iters=10):
+                                    new_act_dist: ActionDistribution,):
         # TODO Make this more generic to be usable by Mothership?
 
         # print("New states input:", new_act_dist.X)
@@ -83,24 +87,40 @@ class Agent:
         rewards = []
         rels = []
         usable_states = []
+
+        planning_task_dict = deepcopy(self.task_dict)
+        planning_task_dict[self.sim_data["start"]].location = self.location
+        self.sim_data["plan_graph"] = self.generate_graph(
+            planning_task_dict, self.sim_data["start"], self.sim_data["end"], filter=False)
+
         for state in states:
             route = state.action_seq
             # Ensure 1 instance per route is evaluated
-            # TODO try doing this filter earlier
             new_route = True
             for test in usable_states:
                 if test.action_seq == route:
                     new_route = False
             if new_route:
-                # Fast MCS to get updated reliability sample
-                route_as_edges = [(route[i], route[i+1])
-                                  for i in range(len(route)-1)]
-                # TODO DO LOCAL UTIL REWARDS HERE INSTEAD
-                rew, rel = fast_simulation(
-                    route_as_edges, self.sim_data["full_graph"], self.sim_data["budget"], sim_iters)
-                state.remaining_budget = self.sim_data["budget"]
+                # print("Evaluating", route)
+                # Fast MCS to get updated reliability value
+                route_as_edges = [route]  # [(route[i], route[i+1])
+                #   for i in range(len(route)-1)]
+                # print("Route check 2:", route_as_edges)
+                _, rel = fast_simulation(
+                    route_as_edges, self.sim_data["plan_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])  # was full graph, but start location is not modded for full graph
+
+                # NOTE DOING LOCAL UTIL REWARDS HERE INSTEAD
+                rew = sim_util_reward(state,
+                                      self.stored_act_dists,
+                                      self.id,
+                                      self.task_dict,
+                                      self.merger_params["mcs_iters"]//2)
+
+                # print("Reliability:", rel, " Reward:", rew)
                 # NOTE filter routes to only those above a reliability threshold
                 if rel >= self.merger_params["rel_thresh"]:
+                    # TODO this isn't a correct budget update. Would want to update maybe from fast_sim results
+                    state.remaining_budget = self.sim_data["budget"]
                     rewards.append(rew)
                     rels.append(rel)
                     usable_states.append(state)
@@ -141,10 +161,10 @@ class Agent:
 
         return [(val - min_val) / (max_val - min_val) for val in values]
 
-    def generate_graph(self, start_task, end_task, filter=True, disp=False):
+    def generate_graph(self, task_dict, start_task, end_task, filter=True, disp=False):
 
         planning_dict = {}
-        for id, task in self.task_dict.items():
+        for id, task in task_dict.items():
             if filter:
                 if (not task.complete) or id == start_task or id == end_task:
                     planning_dict[id] = task
@@ -179,10 +199,21 @@ class Agent:
         # print("\nReceived message from", msg.sender_id, " Content:", msg.content)
         if msg.sender_id == self.sim_data["m_id"]:  # Message from mothership
             print(self.id, "!!! Received M update")
-            if self.id == msg.content[0]:
+            if msg.content[1] == "Dead":
+                if msg.content[0] == self.id:
+                    return
+                if len(self.stored_act_dists[msg.content[0]].best_action().action_seq) > 0:
+                    self.stored_act_dists[msg.content[0]] = ActionDistribution(
+                        [State([], -1)], [1])
+                    self.event = True
+                    self.expected_event = False
+            elif self.id == msg.content[0]:
                 # Receiving own schedule
                 # Compare schedule to stored elites, update action distro
                 self._update_my_best_action_dist(msg.content[1])
+                content = ("Update", self.my_action_dist)
+                self.send_message(
+                    comms_mgr, self.sim_data["m_id"], content)
             else:
                 # Receiving other robot's schedule
                 # TODO? Add this to stored action distros for other agents (rather than simply replacing them)
@@ -193,17 +224,26 @@ class Agent:
                       msg.sender_id, ":", msg.content[1])
                 self.stored_act_dists[msg.sender_id] = msg.content[1]
             # Return copy of current act dis if sending agent has initiated comms
-            if msg.content[0] == "initiate":
+            elif msg.content[0] == "initiate":
                 if self.my_action_dist != None:
                     self.send_message(comms_mgr, msg.sender_id,
                                       ("respond", self.my_action_dist))
-            if msg.content[0] == "respond":
+            elif msg.content[0] == "respond":
                 self.stored_act_dists[msg.sender_id] = msg.content[1]
-            if msg.content[0] == "Edge":
+            elif msg.content[0] == "Edge":
                 if self.sim_data["basic"]:
                     self.sim_data["graph"].cost_distributions[msg.content[1]
                                                               ] = msg.content[2]
-            if msg.content[0] == "Complete Task":
+            elif msg.content == "Dead":
+                if msg.sender_id == self.id:
+                    return
+                if len(self.stored_act_dists[msg.sender_id].best_action().action_seq) > 0:
+                    self.stored_act_dists[msg.sender_id] = ActionDistribution(
+                        [State([], -1)], [1])
+                    self.event = True
+                    self.expected_event = False
+
+            elif msg.content[0] == "Complete Task":
                 self.task_dict[msg.content[1]].complete = True
                 print(self.id, "!!! Received task complete:", msg.content[1])
                 if self.sim_data["basic"]:
@@ -224,8 +264,8 @@ class Agent:
         for t_id, task in task_dict.items():
             self.load_task(t_id, task.location, task.work, task.reward)
 
-        self.sim_data["full_graph"] = self.generate_graph(
-            self.sim_data["start"], self.sim_data["end"], filter=False)
+        self.sim_data["full_graph"] = self.generate_graph(self.task_dict,
+                                                          self.sim_data["start"], self.sim_data["end"], filter=False)
 
     def reduce_energy(self, velocity=0):
         if self.sim_data["basic"]:

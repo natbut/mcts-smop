@@ -70,6 +70,7 @@ def chance_task_add(prob_config_fp,
         print("!!! NEW TASK")
         for a in agent_list:
             a.load_tasks_on_agent(task_dict)
+            a.expected_event = False
 
 
 if __name__ == "__main__":
@@ -167,6 +168,7 @@ if __name__ == "__main__":
             print("Executing schedules...")
             running = True
             i = 0
+            b = 0
             viz = set_up_visualizer(env, temp_task_dict)
             # viz.display_env(pssngr_list, static=False)
             while running:
@@ -175,7 +177,7 @@ if __name__ == "__main__":
                     mothership.update_reachable_neighbors(comms_mgr)
 
                 for p in pssngr_list:
-                    print("= Passenger", p.id, " Rem Energy:",
+                    print("= Passenger", p.id, " Schedule:", p.schedule, " Rem Energy:",
                           p.sim_data["budget"])
                     # print("Schedule:", p.schedule,
                     #       " Act Dist:", p.my_action_dist)
@@ -184,8 +186,11 @@ if __name__ == "__main__":
                     p.sense_location_from_env(env)
                     p.sense_flow_from_env(env)
                     p.apply_observations_to_model()
-
                     p.update_reachable_neighbors(comms_mgr)
+
+                    # if i > len(pssngr_list) and i % (50 + p.id) == 0:
+                    #     p.expected_event = False
+                    #     p.event = True
 
                     # Each time action is complete, do rescheduling (if distr)
                     if "Dist" in sim_config or "Hybrid" in sim_config:
@@ -210,10 +215,14 @@ if __name__ == "__main__":
                                 p.have_failure(
                                     comms_mgr, pssngr_list, sim_config)
                                 fails += 1
-                    # Continue broadcasting failure
-                    p.failure_update(comms_mgr, pssngr_list, sim_config)
+                        # else:
+                            # Continue broadcasting failure (up to b times)
+                            # if b < 5:
+                            #     p.failure_update(
+                            #         comms_mgr, pssngr_list, sim_config)
+                            #     b += 1
 
-                    # Update comms graph
+                            # Update comms graph
                     comms_mgr.update_connections()
 
                 # Probability that new task is added to problem
@@ -248,6 +257,7 @@ if __name__ == "__main__":
 
             print("Done")
             viz.close_viz()
+            env.reset()
 
             # Store results
             reward = calculate_final_reward(temp_task_dict, pssngr_list)

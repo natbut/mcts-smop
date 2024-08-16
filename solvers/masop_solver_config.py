@@ -12,10 +12,11 @@ class State:
 
     def __init__(self, act_seq, budget):
         self.action_seq = act_seq  # ordered list of tasks to visit
+        # Expected budget remaining once act_seq is executed (USE ONLY FOR DEC-MCTS)
         self.remaining_budget = budget
 
     def __str__(self):
-        return "x:" + str(self.action_seq) + " | rem_budget:" + str(self.remaining_budget)
+        return "x:" + str(self.action_seq) + " | exp_rem_budget:" + str(self.remaining_budget)
 
 
 # === GENERAL HELPER FUNCTIONS ===
@@ -62,6 +63,36 @@ def route_stoch_cost(route, graph: Graph):
     return sum(graph.get_stoch_cost_edgeWork((route[i], route[i+1])) for i in range(len(route)-1))
 
 
+# def route_stoch_reward_budget(solution, graph: Graph, budget):
+#     """
+#     Evaluate cost of each route (list of vertices) in solution using graph. If cost is within budget, add rewards from route to rewards sum. Return sum.
+#     """
+#     all_tasks_successfully_visited = []
+#     fail = 0
+#     rem_budgs = []
+#     for route in solution:
+#         # Only apply tasks if route is a success
+#         cost = route_stoch_cost(route, graph)
+#         if cost < budget:
+#             all_tasks_successfully_visited += route
+#             rem_budgs.append(budget - cost)
+#         else:
+#             fail = 1
+#     unique_tasks_visited = set(all_tasks_successfully_visited)
+#     return sum(graph.rewards[task_id] for task_id in unique_tasks_visited), fail, np.average(rem_budgs)
+
+
+# def fast_sim_get_budget(solution, graph, budget, iterations):
+#     rewards = []
+#     fails = 0
+#     for _ in range(iterations):
+#         rew, fail, avg_rem_budg = route_stoch_reward_budget(
+#             solution, graph, budget)
+#         rewards.append(rew)
+#         fails += fail
+#     return sum(rew for rew in rewards) / iterations, (iterations - fails) / iterations, avg_rem_budg
+
+
 def fast_simulation(solution, graph: Graph, budget, iterations):
     """
     Solution here is list of routes [[vs, v1, v2, vg], [vs, v3, v4, vg], ...]
@@ -106,6 +137,45 @@ def calculate_final_reward(task_dict, agent_list):
     return sum(task_dict[task_id].reward for task_id in unique_tasks_visited) / sum(task_dict[task_id].reward for task_id in task_dict)
 
 
+def sim_util_reward(test_state: State,
+                    act_dists,
+                    rob_id,
+                    task_dict,
+                    sim_iters,
+                    ):
+    """
+    Given a state to test and a dictionary of action distributions, perform 
+    sampling cycles to evaluate the local utility of the test state.
+
+    Consider also whether tasks have been completed
+    """
+    rews = []
+    for _ in range(sim_iters):
+
+        tasks_without_robot_i = []
+        all_tasks_visited = test_state.action_seq[:]
+        for id in act_dists.keys():
+            scheduled = act_dists[id].random_action().action_seq[:]
+            if id != rob_id:
+                tasks_without_robot_i += scheduled
+            all_tasks_visited += scheduled
+
+        for id, task in task_dict.items():
+            if task.complete:
+                if id not in all_tasks_visited:
+                    tasks_without_robot_i.append(id)
+                    all_tasks_visited.append(id)
+
+        unique_visited = set(all_tasks_visited)
+        unique_visited_without = set(tasks_without_robot_i)
+
+        util_rew = sum(task_dict[id].reward for id in unique_visited) - sum(
+            task_dict[id].reward for id in unique_visited_without)
+        rews.append(util_rew)
+
+    return np.average(rews)
+
+
 def local_util_reward(data: dict, states: dict[State], rob_id):
     """
     Returns "utility" of rob_id tour, calculated as difference in global reward with and without tour.
@@ -118,8 +188,8 @@ def local_util_reward(data: dict, states: dict[State], rob_id):
     for robot in states:
         if states[robot].remaining_budget > 0:
             if robot != rob_id:
-                tasks_without_robot_i += states[robot].action_seq
-            all_tasks_visited += states[robot].action_seq
+                tasks_without_robot_i += states[robot].action_seq[:]
+            all_tasks_visited += states[robot].action_seq[:]
     unique_tasks_visited = set(all_tasks_visited)
     unique_tasks_visited_without = set(tasks_without_robot_i)
     task_dict = data["task_dict"]

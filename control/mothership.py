@@ -6,6 +6,7 @@ import numpy as np
 from control.agent import Agent, load_data_from_config
 from control.passenger import Passenger
 from sim.comms_manager import CommsManager, Message
+from solvers.masop_solver_config import State
 from solvers.my_DecMCTS import ActionDistribution
 from solvers.sim_brvns import sim_brvns
 
@@ -20,8 +21,9 @@ class Mothership(Agent):
     def solve_team_schedules(self, comms_mgr: CommsManager, agent_list: list[Passenger]):
         # Get an initial solution
         data = self.solver_params
-        self.sim_data["graph"] = self.generate_graph(
-            self.sim_data["start"], self.sim_data["end"])
+        self.sim_data["graph"] = self.generate_graph(self.task_dict,
+                                                     self.sim_data["start"], self.sim_data["end"],
+                                                     filter=True)
         data["graph"] = self.sim_data["graph"]
         data["budget"] = self.sim_data["budget"]
         data["start"] = self.sim_data["start"]
@@ -73,8 +75,9 @@ class Mothership(Agent):
                                   comms_mgr: CommsManager,
                                   agent_id,
                                   budget,
-                                  starting_task,
+                                  starting_task_id,
                                   current_schedule,
+                                  starting_location,
                                   act_samples=1):
 
         # No rescheduling for agents that don't need it
@@ -84,15 +87,19 @@ class Mothership(Agent):
         if len(current_schedule) <= 1:
             return
 
-        print("Solving hybrid schedule...")
+        print("Solving centralized schedule...")
 
         # Set up solver params
         data = self.solver_params
-        self.sim_data["graph"] = self.generate_graph(
-            starting_task, self.sim_data["end"])
+        planning_task_dict = deepcopy(self.task_dict)
+        planning_task_dict[starting_task_id].location = starting_location
+        self.sim_data["planning_graph"] = self.generate_graph(
+            planning_task_dict,
+            starting_task_id, self.sim_data["end"],
+            filter=True)
         data["end"] = self.sim_data["end"]
         data["budget"] = budget
-        data["start"] = starting_task
+        data["start"] = starting_task_id
         data["num_robots"] = 1
 
         # Reduce vertices to only available tasks
@@ -108,26 +115,26 @@ class Mothership(Agent):
             alloc_tasks = []
             for rob_id, act_dist in self.stored_act_dists.items():
                 if rob_id != agent_id:
-                    alloc_tasks += act_dist.best_action().action_seq  # TODO
+                    alloc_tasks += act_dist.best_action().action_seq
+                    # TODO: Do random_action here if doing many samples
 
             alloc_tasks = set(alloc_tasks)  # + self.completed_tasks)
 
             # print("Reduced set:", alloc_tasks)
-            print("Tasks to remove:", alloc_tasks)
+            # print("Tasks to remove:", alloc_tasks)
 
-            data["graph"] = deepcopy(self.sim_data["graph"])
+            data["planning_graph"] = deepcopy(self.sim_data["planning_graph"])
             for v in alloc_tasks:
-                if v in data["graph"].vertices:
+                if v in data["planning_graph"].vertices:
                     if v != data["end"] and v != data["start"]:
-                        data["graph"].vertices.remove(v)
+                        data["planning_graph"].vertices.remove(v)
 
-            print("M Planning with:", data["graph"].vertices)
+            print("M Planning with:", data["planning_graph"].vertices)
 
-            if len(data["graph"].vertices) == 0:
+            if len(data["planning_graph"].vertices) == 0:
                 continue
 
-            # TODO try shorter solver time during runtime w/ multiple samples
-            solution, rew, rel = sim_brvns(data["graph"],
+            solution, rew, rel = sim_brvns(data["planning_graph"],
                                            data["budget"],
                                            data["num_robots"],
                                            data["start"],
@@ -195,7 +202,14 @@ class Mothership(Agent):
                                            msg.content[1],
                                            msg.content[2],
                                            msg.content[3],
+                                           msg.content[4]
                                            )
+
+        if msg.content == "Dead":
+            for target in self.pssngr_list:
+                if target.id != msg.sender_id:
+                    content = (msg.sender_id, msg.content)
+                    self.send_message(comms_mgr, target.id, content)
 
 
 def generate_mothership_with_data(id, solver_params, sim_data, merger_params, pssngr_list) -> Mothership:

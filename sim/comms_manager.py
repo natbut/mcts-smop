@@ -64,9 +64,9 @@ class CommsManager:
         Updates agent_comms_dict to reflect agent connections as function of distance
         """
         # Iterate through agent connections to update comms dict
-        for agent1 in self.env.agent_loc_dict:
+        for agent1 in self.env.agent_loc_dict.keys():
             agent_connections = {}
-            for agent2 in self.env.agent_loc_dict:
+            for agent2 in self.env.agent_loc_dict.keys():
                 if agent1 != agent2:
                     agent1_loc = np.array(self.env.agent_loc_dict[agent1])
                     agent2_loc = np.array(self.env.agent_loc_dict[agent2])
@@ -89,8 +89,8 @@ class CommsManager:
         # Function to receive new messages for passing
         # Called by agent to add a message to comms manager
         # Process delay time
-        agent1_loc = np.array(self.agent_dict[msg.sender_id].location)
-        agent2_loc = np.array(self.agent_dict[msg.receiver_id].location)
+        agent1_loc = np.array(self.env.agent_loc_dict[msg.sender_id])
+        agent2_loc = np.array(self.env.agent_loc_dict[msg.receiver_id])
         dist = np.linalg.norm(agent1_loc-agent2_loc)
 
         # NOTE Instead of delay, set success prob here

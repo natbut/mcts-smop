@@ -14,6 +14,7 @@ class Environment:
         flow_data_files: list[str],
         env_dimensions: tuple,
         agent_loc_dict: dict,
+        base_loc,
         thin_params: tuple = (1, 1, 1),
         time_step_size: int = 1,
     ):
@@ -34,6 +35,7 @@ class Environment:
         self.FLOW_MULTIPLIER = 1000  # TODO FLOW MAGNITUDE MODIFIER
 
         self.agent_loc_dict = agent_loc_dict
+        self.base_loc = base_loc
 
         # Process datasets (thin dataset & crop to dimensions)
         x_thinning = thin_params[0]
@@ -141,6 +143,11 @@ class Environment:
                 self.processed_flow_data[self.flow_data_idx],
                 self.processed_flow_data[self.flow_data_idx + 1],
             )
+
+    def reset(self):
+
+        for a_id in self.agent_loc_dict.keys():
+            self.agent_loc_dict[a_id] = self.base_loc
 
     def _update_flow_modifiers(self, flow_hour1, flow_hour2):
         """
@@ -332,5 +339,6 @@ def make_environment_from_config(
         tidal_fps,
         dims,
         agent_loc_dict,
+        loc,
         thinning,
     )
