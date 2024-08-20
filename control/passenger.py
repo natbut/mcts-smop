@@ -5,6 +5,7 @@ from copy import deepcopy
 import numpy as np
 
 from control.agent import Agent, load_data_from_config
+from control.task import Task
 from sim.comms_manager import CommsManager
 from solvers.masop_solver_config import State, fast_simulation
 from solvers.my_DecMCTS import ActionDistribution, Tree
@@ -52,12 +53,11 @@ class Passenger(Agent):
             return
 
         # Otherwise, distro
-        super()._update_my_best_action_dist(new_act_dist,
-                                            )
+        super()._update_my_best_action_dist(new_act_dist)
 
     def optimize_schedule_distr(self, comms_mgr: CommsManager, sim_config):
 
-        # No optimization needed if no events or are dead
+        # No optimization needed if no events or are dead/finished
         if (not self.event) or self.dead or self.finished:
             return
 
@@ -69,24 +69,23 @@ class Passenger(Agent):
 
         # Evaluate remaining schedule. If failure risk is low then do not optimize
         # NOTE I expect that this will improve performance in low-disturbance situations. However, when robots fail or new tasks are added we would like to mandate that an update happens and skip this check.
+        # TODO we've removed this chunk for testing
+        # if self.expected_event and "Dist" not in sim_config:
+        #     # [[(self.schedule[i], self.schedule[i+1])
+        #     route_as_edges = [self.schedule]
+        #     #   for i in range(len(self.schedule)-1)]]
+        #     # print("Route check 1:", route_as_edges)
+        #     planning_task_dict = deepcopy(self.task_dict)
+        #     planning_task_dict[self.sim_data["start"]].location = self.location
+        #     self.sim_data["sim_graph"] = self.generate_graph(planning_task_dict, self.sim_data["start"], self.sim_data["end"],
+        #                                                      filter=False)
+        #     _, rel = fast_simulation(
+        #         route_as_edges, self.sim_data["sim_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])
 
-        if self.expected_event and "Dist" not in sim_config:
-            # [[(self.schedule[i], self.schedule[i+1])
-            route_as_edges = [self.schedule]
-            #   for i in range(len(self.schedule)-1)]]
-            # print("Route check 1:", route_as_edges)
-            planning_task_dict = deepcopy(self.task_dict)
-            planning_task_dict[self.sim_data["start"]].location = self.location
-            self.sim_data["plan_graph"] = self.generate_graph(planning_task_dict, self.sim_data["start"], self.sim_data["end"],
-                                                              filter=True)
-
-            _, rel = fast_simulation(
-                route_as_edges, self.sim_data["plan_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])
-
-            if rel > self.merger_params["rel_thresh"]:
-                self.event = False
-                print("Optimization not required")
-                return
+        #     if rel > self.merger_params["rel_thresh"]:
+        #         self.event = False
+        #         print("Optimization not required")
+        #         return
 
         print("\n! Optimizing schedule")
 
@@ -94,7 +93,6 @@ class Passenger(Agent):
         if "Hybrid2" in sim_config:
             content = ("Schedule Request",
                        self.sim_data["budget"],
-                       self.sim_data["start"],
                        self.schedule,
                        self.location
                        )
@@ -106,11 +104,14 @@ class Passenger(Agent):
         data = self.solver_params
         # print("Generating graph...")
         planning_task_dict = deepcopy(self.task_dict)
-        planning_task_dict[self.sim_data["start"]].location = self.location
+        planning_task_dict[self.sim_data["rob_task"]] = Task(
+            self.sim_data["rob_task"], self.location, 0, 1)
+        self.sim_data["start"] = self.sim_data["rob_task"]
+        # planning_task_dict[self.sim_data["start"]].location = self.location
         self.sim_data["plan_graph"] = self.generate_graph(planning_task_dict,
                                                           self.sim_data["start"], self.sim_data["end"],
                                                           filter=True)
-        data["task_dict"] = self.task_dict
+        data["task_dict"] = planning_task_dict
         data["graph"] = self.sim_data["plan_graph"]
         data["start"] = self.sim_data["start"]
         data["end"] = self.sim_data["end"]
@@ -133,11 +134,13 @@ class Passenger(Agent):
             # TODO test with comms exchange removed during planning
             content = ("initiate", tree.my_act_dist)
             for target in self.neighbors_status:
-                if self.neighbors_status[target]:
+                if self.neighbors_status[target] and target != self.sim_data["m_id"]:
                     self.send_message(comms_mgr,
                                       target,
                                       ("initiate", tree.my_act_dist))
-
+        for sched in tree.my_act_dist.X:
+            if sched.action_seq[0] == self.sim_data["rob_task"]:
+                sched.action_seq.pop(0)
         # Evaluate candidate solutions against current stored elites, reduce to subset of size n_comms, select best act sequence from elites as new schedule
         # NOTE only need to do this type of solution merge if hybrid
         if "Hybrid" in sim_config:
@@ -172,6 +175,7 @@ class Passenger(Agent):
         # print("Passenger", self.id, " Current action:",
         #       self.action, " | Schedule:", self.schedule, " | Dead:", self.dead, " | Complete:", self.finished)
         # ("IDLE", -1)
+        self.task_dict[self.sim_data["rob_task"]].location = self.location
 
         # === BREAKING CRITERIA ===
         # If out of energy, don't do anything
@@ -194,11 +198,12 @@ class Passenger(Agent):
                 return
 
         if self.action[0] == self.IDLE and len(self.schedule) > 0:
+            print("Traveling to first task in sched:", self.schedule)
             # Start tour & remove first element from schedule
             self.action[0] = self.TRAVELING
-            leaving = self.schedule.pop(0)
-            self.task_dict[leaving].complete = True
-            self.action[1] = self.schedule[0]
+            # leaving = self.schedule.pop(0)
+            # self.task_dict[leaving].complete = True
+            self.action[1] = self.schedule.pop(0)
 
             # NOTE remove first action (step) from each possible seq
             # Handled by optimize_distr
@@ -246,7 +251,7 @@ class Passenger(Agent):
         # 2) If working and work is complete, become Idle
         if self.action[0] == self.WORKING and self.work_remaining <= 0:
             # print(self.id, "Work complete, becoming Idle")
-            self.event = True
+            # self.event = True
             self.action[0] = self.IDLE
             # Mark task complete
             self.completed_tasks.append(self.action[1])

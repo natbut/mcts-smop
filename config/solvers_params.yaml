@@ -16,6 +16,6 @@ exploratory_mcs_iters: 10
 intensive_mcs_iters: 100
 
 # Merger
-mcs_iters: 100
+mcs_iters: 50
 rel_mod: 0.01
-rel_thresh: 0.99
+rel_thresh: 0.9

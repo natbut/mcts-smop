@@ -115,8 +115,9 @@ def set_up_cost_distributions(vertices, means, vars, c=0.05):
                 edge = (v1, v2)
                 mean = means[edge]
                 # TODO will want to change this variation handling - maybe move to env_model and preset edges differently?
-                # Vars from env_model are primarily 0
+                # Vars from env_model are primarily 0 on init
                 stddev = max((c * mean)**0.5, vars[edge]**0.5)
+                # max((c * mean)**0.5, vars[edge]**0.5)
                 # print("Setting cost dist", (v1, v2), ":", mean, stddev)
                 cost_distributions[edge] = norm(loc=mean, scale=stddev)
                 # print("Mean:", mean, " Norm Mean: ",

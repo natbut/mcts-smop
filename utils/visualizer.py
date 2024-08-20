@@ -167,13 +167,20 @@ class Visualizer:
             if len(a.schedule) == 0:
                 end_loc = a.base_loc
             else:
-                end_loc = self.task_dict[a.schedule[0]].location
+                # if a.schedule[0] != a.sim_data["rob_task"]:
+                if a.action[1] != "Init":
+                    end_loc = self.task_dict[a.action[1]].location
+                # else:
+                #     end_loc = a.location
             self.ax.arrow(start_loc[0], start_loc[1], end_loc[0] - start_loc[0], end_loc[1] - start_loc[1],
                           shape='full', width=400, length_includes_head=True, ec=cmap, fc=cmap)
             if len(a.schedule) > 0:
                 start_loc = end_loc
                 for task_id in a.schedule:
+                    # if task_id != a.sim_data["rob_task"]:
                     end_loc = self.task_dict[task_id].location
+                    # else:
+                    #     end_loc = a.location
                     # Plot the edge as directed arrow
                     self.ax.arrow(start_loc[0], start_loc[1], end_loc[0] - start_loc[0], end_loc[1] - start_loc[1],
                                   shape='full', width=400, length_includes_head=True, ec=cmap, fc=cmap)

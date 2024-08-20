@@ -152,14 +152,17 @@ def sim_util_reward(test_state: State,
     rews = []
     for _ in range(sim_iters):
 
+        # Collect visited tasks with and without robot_i
         tasks_without_robot_i = []
-        all_tasks_visited = test_state.action_seq[:]
+        # Don't count starting tasks
+        all_tasks_visited = test_state.action_seq[1:]
         for id in act_dists.keys():
-            scheduled = act_dists[id].random_action().action_seq[:]
+            scheduled = act_dists[id].random_action().action_seq[1:]
             if id != rob_id:
                 tasks_without_robot_i += scheduled
             all_tasks_visited += scheduled
 
+        # Also include other completed tasks to reward schedules that don't double-visit tasks
         for id, task in task_dict.items():
             if task.complete:
                 if id not in all_tasks_visited:

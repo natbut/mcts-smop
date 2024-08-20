@@ -177,7 +177,7 @@ if __name__ == "__main__":
                     mothership.update_reachable_neighbors(comms_mgr)
 
                 for p in pssngr_list:
-                    print("= Passenger", p.id, " Schedule:", p.schedule, " Rem Energy:",
+                    print("= Passenger", p.id, " Tour:", [p.action[1]] + p.schedule, " Rem Energy:",
                           p.sim_data["budget"])
                     # print("Schedule:", p.schedule,
                     #       " Act Dist:", p.my_action_dist)
@@ -188,9 +188,11 @@ if __name__ == "__main__":
                     p.apply_observations_to_model()
                     p.update_reachable_neighbors(comms_mgr)
 
-                    # if i > len(pssngr_list) and i % (50 + p.id) == 0:
-                    #     p.expected_event = False
-                    #     p.event = True
+                    # Forces periodic rescheduling for hybrid
+                    if i > len(pssngr_list) and i % (50 + (2*p.id)) == 0:
+                        # p.expected_event = False
+                        p.action[0] = p.IDLE
+                        p.event = True
 
                     # Each time action is complete, do rescheduling (if distr)
                     if "Dist" in sim_config or "Hybrid" in sim_config:
@@ -222,7 +224,7 @@ if __name__ == "__main__":
                             #         comms_mgr, pssngr_list, sim_config)
                             #     b += 1
 
-                            # Update comms graph
+                    # Update comms graph
                     comms_mgr.update_connections()
 
                 # Probability that new task is added to problem
@@ -264,6 +266,8 @@ if __name__ == "__main__":
             potent = calculate_final_potential_reward(
                 temp_task_dict, pssngr_list)
             percentDead = sum(p.dead for p in pssngr_list) / len(pssngr_list)
+
+            print("Final Potential:", potent, " | Actual:", reward)
 
             if sim_config == "Cent | Best":
                 best_results.append(reward)

@@ -5,6 +5,7 @@ import numpy as np
 
 from control.agent import Agent, load_data_from_config
 from control.passenger import Passenger
+from control.task import Task
 from sim.comms_manager import CommsManager, Message
 from solvers.masop_solver_config import State
 from solvers.my_DecMCTS import ActionDistribution
@@ -23,8 +24,9 @@ class Mothership(Agent):
         data = self.solver_params
         self.sim_data["graph"] = self.generate_graph(self.task_dict,
                                                      self.sim_data["start"], self.sim_data["end"],
-                                                     filter=True)
+                                                     filter=False)
         data["graph"] = self.sim_data["graph"]
+        data["graph"].vertices.remove(self.sim_data["rob_task"])
         data["budget"] = self.sim_data["budget"]
         data["start"] = self.sim_data["start"]
         data["end"] = self.sim_data["end"]
@@ -75,7 +77,6 @@ class Mothership(Agent):
                                   comms_mgr: CommsManager,
                                   agent_id,
                                   budget,
-                                  starting_task_id,
                                   current_schedule,
                                   starting_location,
                                   act_samples=1):
@@ -92,14 +93,22 @@ class Mothership(Agent):
         # Set up solver params
         data = self.solver_params
         planning_task_dict = deepcopy(self.task_dict)
-        planning_task_dict[starting_task_id].location = starting_location
+        planning_task_dict[self.sim_data["rob_task"]] = Task(
+            self.sim_data["rob_task"], starting_location, 0, 1)
+        # self.sim_data["start"] = "vr"
+        print("Starting Task Location:",
+              planning_task_dict[self.sim_data["rob_task"]].location, " Robot location:", starting_location)
+
+        # planning_task_dict[starting_task_id].location = starting_location
         self.sim_data["planning_graph"] = self.generate_graph(
             planning_task_dict,
-            starting_task_id, self.sim_data["end"],
-            filter=True)
+            self.sim_data["rob_task"],
+            self.sim_data["end"],
+            filter=True
+        )
         data["end"] = self.sim_data["end"]
         data["budget"] = budget
-        data["start"] = starting_task_id
+        data["start"] = self.sim_data["rob_task"]
         data["num_robots"] = 1
 
         # Reduce vertices to only available tasks
@@ -115,7 +124,7 @@ class Mothership(Agent):
             alloc_tasks = []
             for rob_id, act_dist in self.stored_act_dists.items():
                 if rob_id != agent_id:
-                    alloc_tasks += act_dist.best_action().action_seq
+                    alloc_tasks += act_dist.best_action().action_seq[:]
                     # TODO: Do random_action here if doing many samples
 
             alloc_tasks = set(alloc_tasks)  # + self.completed_tasks)
@@ -156,6 +165,9 @@ class Mothership(Agent):
             rels.append(rel)
 
         print("Schedules solved:", [s.action_seq for s in sols])
+        for s in sols:
+            if s.action_seq[0] == self.sim_data["rob_task"]:
+                s.action_seq.pop(0)
 
         if len(sols) == 0:
             return
@@ -202,7 +214,6 @@ class Mothership(Agent):
                                            msg.content[1],
                                            msg.content[2],
                                            msg.content[3],
-                                           msg.content[4]
                                            )
 
         if msg.content == "Dead":

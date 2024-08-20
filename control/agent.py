@@ -53,6 +53,8 @@ class Agent:
         # Task-related variables
         self.completed_tasks = [self.sim_data["start"]]
         self.task_dict = {}
+        self.task_dict[self.sim_data["rob_task"]] = Task(
+            self.sim_data["rob_task"], self.location, 0, 1)
 
     def _get_valid_schedule_options(self, new_states: list[State]):
         # Trim down to only valid schedules (consider new states and stored)
@@ -89,9 +91,14 @@ class Agent:
         usable_states = []
 
         planning_task_dict = deepcopy(self.task_dict)
-        planning_task_dict[self.sim_data["start"]].location = self.location
-        self.sim_data["plan_graph"] = self.generate_graph(
-            planning_task_dict, self.sim_data["start"], self.sim_data["end"], filter=False)
+        planning_task_dict[self.sim_data["rob_task"]] = Task(
+            self.sim_data["rob_task"], self.location, 0, 1)
+
+        # planning_task_dict[self.sim_data["start"]].location = self.location
+        self.sim_data["sim_graph"] = self.generate_graph(planning_task_dict,
+                                                         self.sim_data["rob_task"],
+                                                         self.sim_data["end"],
+                                                         filter=False)
 
         for state in states:
             route = state.action_seq
@@ -101,22 +108,19 @@ class Agent:
                 if test.action_seq == route:
                     new_route = False
             if new_route:
-                # print("Evaluating", route)
-                # Fast MCS to get updated reliability value
-                route_as_edges = [route]  # [(route[i], route[i+1])
-                #   for i in range(len(route)-1)]
-                # print("Route check 2:", route_as_edges)
+                route = [self.sim_data["rob_task"]] + route
+                print("Evaluating", route)
                 _, rel = fast_simulation(
-                    route_as_edges, self.sim_data["plan_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])  # was full graph, but start location is not modded for full graph
+                    [route], self.sim_data["sim_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])  # was full graph, but start location is not modded for full graph
 
                 # NOTE DOING LOCAL UTIL REWARDS HERE INSTEAD
                 rew = sim_util_reward(state,
                                       self.stored_act_dists,
                                       self.id,
                                       self.task_dict,
-                                      self.merger_params["mcs_iters"]//2)
+                                      self.merger_params["mcs_iters"])
 
-                # print("Reliability:", rel, " Reward:", rew)
+                print("Reliability:", rel, " Reward:", rew)
                 # NOTE filter routes to only those above a reliability threshold
                 if rel >= self.merger_params["rel_thresh"]:
                     # TODO this isn't a correct budget update. Would want to update maybe from fast_sim results
@@ -139,9 +143,13 @@ class Agent:
         rewards = np.array(self.normalize(rewards))
         rels = np.array(self.normalize(rels))
         scores = rewards + (rels * self.merger_params["rel_mod"])
+        # print("Rews:", rewards, " Rels:", rels, " Scores:", scores)
         pairs = list(zip(scores, usable_states))
         sorted_pairs = sorted(pairs, key=lambda pair: pair[0], reverse=True)
-        rewards, states = zip(*sorted_pairs)
+        # print("Sorted pairs:", [(pair[0], pair[1].action_seq)
+        #   for pair in sorted_pairs])
+        scores, states = zip(*sorted_pairs)
+        # print("Unzipped pairs:", scores, [st.action_seq for st in states])
         top_states = states[:self.solver_params["comm_n"]]
         top_scores = scores[:self.solver_params["comm_n"]]
         # Update action distribution
@@ -205,8 +213,8 @@ class Agent:
                 if len(self.stored_act_dists[msg.content[0]].best_action().action_seq) > 0:
                     self.stored_act_dists[msg.content[0]] = ActionDistribution(
                         [State([], -1)], [1])
-                    self.event = True
-                    self.expected_event = False
+                    # self.event = True
+                    # self.expected_event = False
             elif self.id == msg.content[0]:
                 # Receiving own schedule
                 # Compare schedule to stored elites, update action distro
@@ -216,7 +224,6 @@ class Agent:
                     comms_mgr, self.sim_data["m_id"], content)
             else:
                 # Receiving other robot's schedule
-                # TODO? Add this to stored action distros for other agents (rather than simply replacing them)
                 self.stored_act_dists[msg.content[0]] = msg.content[1]
         else:
             if msg.content[0] == "Update":
@@ -240,8 +247,8 @@ class Agent:
                 if len(self.stored_act_dists[msg.sender_id].best_action().action_seq) > 0:
                     self.stored_act_dists[msg.sender_id] = ActionDistribution(
                         [State([], -1)], [1])
-                    self.event = True
-                    self.expected_event = False
+                    # self.event = True
+                    # self.expected_event = False
 
             elif msg.content[0] == "Complete Task":
                 self.task_dict[msg.content[1]].complete = True
@@ -264,8 +271,8 @@ class Agent:
         for t_id, task in task_dict.items():
             self.load_task(t_id, task.location, task.work, task.reward)
 
-        self.sim_data["full_graph"] = self.generate_graph(self.task_dict,
-                                                          self.sim_data["start"], self.sim_data["end"], filter=False)
+        self.sim_data["sim_graph"] = self.generate_graph(self.task_dict,
+                                                         self.sim_data["start"], self.sim_data["end"], filter=False)
 
     def reduce_energy(self, velocity=0):
         if self.sim_data["basic"]:
@@ -394,7 +401,8 @@ def load_data_from_config(solver_config_fp, problem_config_fp):
                 "basic": prob_config["basic"],
                 "m_id": prob_config["m_id"],
                 "env_dims": dims,
-                "base_loc": prob_config["base_loc"]
+                "base_loc": prob_config["base_loc"],
+                "rob_task": prob_config["rob_task"]
             }
 
             merger_data = {"rel_mod": solve_config["rel_mod"],

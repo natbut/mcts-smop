@@ -1,6 +1,6 @@
 # DEFINE TEST PARAMETERS
 
-trials: 3
+trials: 5
 
 comms_max_range: 200000
 comms_decay_range: 2000 # Every decay_range meters, succ prob decays by decay rate (between passengers)
@@ -13,8 +13,8 @@ new_task_prob: 0.00 # % chance new task appears each time step
 num_new_tasks: 1
 
 robot_fail_prob: 0.00 # % chance a robot fails each time step
-percent_fail: 0.25 # % of robots that will fail at fail_timestep
-fail_timeStep: 50
+percent_fail: 0.0 # % of robots that will fail at fail_timestep
+fail_timeStep: 75
 
 # == Define each type of test that will run on each test case (trial)
 sim_configs:
