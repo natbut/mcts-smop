@@ -16,9 +16,10 @@ from sim.environment import Environment
 # Class for visualizing environmnent with tasks and agents
 class Visualizer:
 
-    def __init__(self, env: Environment, task_dict):
+    def __init__(self, env: Environment, task_dict, title=None):
         self.env = env
         self.task_dict = task_dict
+        self.title = title
 
         env_dims = self.env.get_dim_ranges()
         x_size = abs(env_dims[0][1] - env_dims[0][0])
@@ -96,24 +97,34 @@ class Visualizer:
             else:
                 self.ax.annotate(id, (task_x[i], task_y[i]))
 
-    def _add_robots_to_plot(self):
-        # Locate robots
-        robot_locs = [loc for loc in self.env.agent_loc_dict.values()]
+    def _add_robots_to_plot(self, group_list: list[Agent], supp_list: list[Agent]):
 
-        rob_x = [loc[0] for loc in robot_locs]
-        rob_y = [loc[1] for loc in robot_locs]
-        rob_z = [loc[2] for loc in robot_locs]
+        for i, ls in enumerate([group_list, supp_list]):
+            # Locate robots
+            robot_locs = [a.location for a in ls]
 
-        # Plot the robots
-        if self.env.SLICE:
-            self.ax.scatter(rob_x, rob_y, c='b', marker='o')
-        else:
-            self.ax.scatter(rob_x, rob_y, rob_z, c='b', marker='o')
+            rob_x = [loc[0] for loc in robot_locs]
+            rob_y = [loc[1] for loc in robot_locs]
+            rob_z = [loc[2] for loc in robot_locs]
+
+            if i == 0:
+                col = 'b'
+                mark = 'o'
+            else:
+                col = 'g'
+                mark = 'x'
+
+            # Plot the robots
+            if self.env.SLICE:
+                self.ax.scatter(rob_x, rob_y, c=col, marker=mark)
+            else:
+                self.ax.scatter(rob_x, rob_y, rob_z, c=col, marker=mark)
 
     def _show_plot(self, static=True):
 
         self.ax.set_xlabel('X')
         self.ax.set_ylabel('Y')
+        self.ax.set_title(self.title)
 
         if not self.env.SLICE:
             self.ax.set_zlabel('Z')  # 3d
@@ -124,7 +135,7 @@ class Visualizer:
             self.fig.canvas.flush_events()
             # time.sleep(0.1)
 
-    def display_env(self, agent_list: list[Agent], static=True):
+    def display_env(self, group_list: list[Agent], supp_list: list[Agent], static=True):
         # Prepare plot
         x, y, z = self._prepare_plot(static)
 
@@ -137,10 +148,10 @@ class Visualizer:
 
         # Plot the robots
         # print('Plotting robots ...')
-        self._add_robots_to_plot()
+        self._add_robots_to_plot(group_list, supp_list)
 
         # Plot the tours
-        self._add_tour_lines_to_plot(agent_list)
+        self._add_tour_lines_to_plot(group_list)
 
         self._show_plot(static)
         # print('Plot Complete')
@@ -212,7 +223,8 @@ class Visualizer:
 
 def set_up_visualizer(
     env: Environment,
-    task_dict
+    task_dict,
+    title=None
 ) -> Visualizer:
 
     # Load up task list locations for visualizer
@@ -227,5 +239,6 @@ def set_up_visualizer(
     #     task_dict[-1] = config["start_loc"]
 
     return Visualizer(env,
-                      task_dict
+                      task_dict,
+                      title
                       )

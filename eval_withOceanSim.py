@@ -5,6 +5,7 @@ import yaml
 
 from control.mothership import gen_mother_from_config
 from control.passenger import generate_passengers_from_config
+from control.support import generate_supports_from_config
 from control.task import add_tasks_to_dict, generate_tasks_from_config
 from sim.comms_manager import CommsManager
 from sim.environment import make_environment_from_config
@@ -84,7 +85,6 @@ if __name__ == "__main__":
         sim_configs = test_config["sim_configs"]
         comms_max_range = test_config["comms_max_range"]
         comms_decay_range = test_config["comms_decay_range"]
-        comms_decay_range_m = test_config["comms_decay_range_m"]
         comms_max_succ_prob = test_config["comms_max_succ_prob"]
         comms_decay_rate = test_config["comms_decay_rate"]
         edge_discovery_prob = test_config["edge_discovery_prob"]
@@ -93,6 +93,8 @@ if __name__ == "__main__":
         robot_fail_prob = test_config["robot_fail_prob"]
         percent_fail = test_config["percent_fail"]
         fail_timeStep = test_config["fail_timeStep"]
+
+        replan_freq = test_config["replan_freq"]
 
     print("Initialize Simulation")
 
@@ -125,41 +127,53 @@ if __name__ == "__main__":
             temp_task_dict = deepcopy(task_dict)
 
             # Create agents
-            pssngr_list = generate_passengers_from_config(args.solver_config,
-                                                          args.problem_config
-                                                          )
+            group_list = generate_passengers_from_config(args.solver_config,
+                                                         args.problem_config)
 
-            # Set up initial env state
-            for p in pssngr_list:
-                p.set_up_dim_ranges(env)
-                p.sense_location_from_env(env)
-                p.load_tasks_on_agent(temp_task_dict)
+            supp_list = generate_supports_from_config(args.solver_config,
+                                                      args.problem_config)
 
-            # Create comms framework (TBD - may be ROS)
-            comms_mgr = CommsManager(env,
-                                     pssngr_list,
-                                     comms_max_range,
-                                     comms_decay_range,
-                                     comms_decay_range_m,
-                                     comms_max_succ_prob,
-                                     comms_decay_rate,
-                                     pssngr_list[0].sim_data["m_id"])
-
-            # For other testing, plan over planning graph
             mothership = gen_mother_from_config(args.solver_config,
                                                 args.problem_config,
-                                                pssngr_list)
-            comms_mgr.agent_dict[pssngr_list[0].sim_data["m_id"]
-                                 ] = mothership
+                                                group_list)
+
+            # Create comms framework (TBD - may be ROS)
+            all_agents = group_list + supp_list + [mothership]
+            comms_mgr = CommsManager(env,
+                                     all_agents,
+                                     comms_max_range,
+                                     comms_decay_range,
+                                     comms_max_succ_prob,
+                                     comms_decay_rate,
+                                     group_list[0].sim_data["m_id"])
+
+            # Set up initial env state
+            mothership.agent_list = all_agents
+            mothership.group_list = group_list
             mothership.update_reachable_neighbors(comms_mgr)
             mothership.set_up_dim_ranges(env)
             mothership.load_tasks_on_agent(temp_task_dict)
+            for p in group_list:
+                p.agent_list = all_agents
+                p.group_list = group_list
+                p.mothership = mothership
+                p.update_reachable_neighbors(comms_mgr)
+                p.set_up_dim_ranges(env)
+                p.sense_location_from_env(env)
+                p.load_tasks_on_agent(temp_task_dict)
+            for s in supp_list:
+                s.agent_list = all_agents
+                s.group_list = group_list
+                s.mothership = mothership
+                s.update_reachable_neighbors(comms_mgr)
+                s.set_up_dim_ranges(env)
+                s.sense_location_from_env(env)
 
             # == If Centralized, Generate Plan & Load on Passengers
             if "Cent" in sim_config or "Hybrid" in sim_config:
                 # Plan on mothership
                 print("Solving team schedules...")
-                mothership.solve_team_schedules(comms_mgr, pssngr_list)
+                mothership.solve_team_schedules(comms_mgr)
 
             # Tracking failed robots for test cases
             fails = 0
@@ -169,69 +183,59 @@ if __name__ == "__main__":
             running = True
             i = 0
             b = 0
-            viz = set_up_visualizer(env, temp_task_dict)
+            title = "Tr " + str(tr) + ": " + sim_config
+            viz = set_up_visualizer(env, temp_task_dict, title)
             # viz.display_env(pssngr_list, static=False)
             while running:
                 print("\n== TIME STEP:", i)
-                if "Hybrid" in sim_config:
-                    mothership.update_reachable_neighbors(comms_mgr)
-
-                for p in pssngr_list:
-                    print("= Passenger", p.id, " Tour:", [p.action[1]] + p.schedule, " Rem Energy:",
-                          p.sim_data["budget"])
-                    # print("Schedule:", p.schedule,
-                    #       " Act Dist:", p.my_action_dist)
-
+                for p in all_agents:
                     # Update observations
                     p.sense_location_from_env(env)
                     p.sense_flow_from_env(env)
                     p.apply_observations_to_model()
                     p.update_reachable_neighbors(comms_mgr)
 
-                    # Forces periodic rescheduling for hybrid
-                    if i > len(pssngr_list) and i % (50 + (2*p.id)) == 0:
-                        # p.expected_event = False
-                        p.action[0] = p.IDLE
-                        p.event = True
+                    if p.type == p.MOTHERSHIP:
+                        print("M completion record:", [
+                              t for t in p.task_dict.keys() if p.task_dict[t].complete])
 
-                    # Each time action is complete, do rescheduling (if distr)
-                    if "Dist" in sim_config or "Hybrid" in sim_config:
+                    if p.type == p.PASSENGER:
+                        print("= Passenger", p.id, " Tour:", [p.action[1]] + p.schedule, " Rem Energy:",
+                              p.sim_data["budget"])
+                        print(p.id, "completion record:", [
+                              t for t in p.task_dict.keys() if p.task_dict[t].complete])
 
-                        # TODO At some point, remove need to pass sim_config into agent functions. Keep sim_config usage only at sim file level.
+                        # Each time action is complete, do rescheduling (if distr)
+                        if "Dist" in sim_config or "Hybrid" in sim_config:
+                            # Forces periodic rescheduling
+                            if i > len(group_list) and i % (replan_freq + (2*p.id)) == 0:
+                                # p.expected_event = False
+                                p.action[0] = p.IDLE
+                                p.event = True
+                            # Solve for new action distro
+                            p.optimize_schedule_distr(comms_mgr, sim_config)
+                        # Update current action, reduce energy
+                        p.action_update(comms_mgr)
+                        # p.share_location(comms_mgr)
 
-                        # Solve for new action distro
-                        p.optimize_schedule_distr(comms_mgr, sim_config)
+                    if p.type == p.SUPPORT:
+                        p.action_update()
 
-                    # Update current action, reduce energy
-                    p.action_update(None, comms_mgr,
-                                    pssngr_list, sim_config)
-
-                    # Potential passenger failure
-                    if "Best" not in sim_config:
+                        # Potential passenger failure
+                    if p.type != p.MOTHERSHIP and "Best" not in sim_config:
                         # Check for random failures
                         p.random_failure(
-                            comms_mgr, pssngr_list, sim_config, robot_fail_prob)
+                            comms_mgr, robot_fail_prob)
+                        if p.type == p.PASSENGER and p.dead:
+                            # Continue attempting to send failure update
+                            p.have_failure(comms_mgr)
                         # Execute designed failures
-                        if i == fail_timeStep:
-                            if fails / len(pssngr_list) < percent_fail:
-                                p.have_failure(
-                                    comms_mgr, pssngr_list, sim_config)
-                                fails += 1
-                        # else:
-                            # Continue broadcasting failure (up to b times)
-                            # if b < 5:
-                            #     p.failure_update(
-                            #         comms_mgr, pssngr_list, sim_config)
-                            #     b += 1
-
-                    # Update comms graph
-                    comms_mgr.update_connections()
+                        # if i == fail_timeStep:
+                        #     if fails / len(group_list) < percent_fail:
+                        #         p.have_failure(comms_mgr)
+                        #         fails += 1
 
                 # Probability that new task is added to problem
-                if "Hybrid" in sim_config:
-                    all_agents = pssngr_list[:] + [mothership]
-                else:
-                    all_agents = pssngr_list
                 chance_task_add(args.problem_config,
                                 env,
                                 temp_task_dict,
@@ -240,18 +244,18 @@ if __name__ == "__main__":
                                 new_task_prob)
 
                 # Update environment
-                env.step(pssngr_list)
+                env.step(all_agents)
 
                 # Update message passing, also update comms graph
                 comms_mgr.step()
 
                 # Update visual
-                viz.display_env(pssngr_list, static=False)
+                viz.display_env(group_list, supp_list, static=False)
                 time.sleep(0.01)
 
                 # Check stopping criteria
                 running = False
-                for p in pssngr_list:
+                for p in group_list:
                     if not (p.dead or p.finished):
                         running = True
 
@@ -262,10 +266,10 @@ if __name__ == "__main__":
             env.reset()
 
             # Store results
-            reward = calculate_final_reward(temp_task_dict, pssngr_list)
+            reward = calculate_final_reward(temp_task_dict, group_list)
             potent = calculate_final_potential_reward(
-                temp_task_dict, pssngr_list)
-            percentDead = sum(p.dead for p in pssngr_list) / len(pssngr_list)
+                temp_task_dict, group_list)
+            percentDead = sum(p.dead for p in group_list) / len(group_list)
 
             print("Final Potential:", potent, " | Actual:", reward)
 

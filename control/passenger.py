@@ -1,8 +1,4 @@
-import math
-import random
 from copy import deepcopy
-
-import numpy as np
 
 from control.agent import Agent, load_data_from_config
 from control.task import Task
@@ -14,30 +10,28 @@ from solvers.my_DecMCTS import ActionDistribution, Tree
 
 
 class Passenger(Agent):
-    IDLE = 0
-    TRAVELING = 1
-    WORKING = 2
 
     def __init__(self, id: int, solver_params: dict, sim_data: dict, merger_params: dict) -> None:
 
         super().__init__(id, solver_params, sim_data, merger_params)
 
+        self.type = self.PASSENGER
+
+        self.mothership = None
+
         # Passenger scheduling & control variables
         self.schedule = []
-        self.initial_alloc_reward = 0
 
         # Passenger action variables
         self.dead = False
         self.finished = False
         self.work_remaining = 0
 
-        # Current action (Traveling/Working/Idle, Task ID)
-        self.action = [self.IDLE, "Init"]
-
     # === SCHEDULING FUNCTIONS ===
 
     def _update_my_best_action_dist(self,
-                                    new_act_dist: ActionDistribution
+                                    new_act_dist: ActionDistribution,
+                                    force_use=False
                                     ):
         # Automatically use schedule if currently have no schedule
         if self.action[1] == "Init":
@@ -53,7 +47,7 @@ class Passenger(Agent):
             return
 
         # Otherwise, distro
-        super()._update_my_best_action_dist(new_act_dist)
+        super()._update_my_best_action_dist(new_act_dist, force_use)
 
     def optimize_schedule_distr(self, comms_mgr: CommsManager, sim_config):
 
@@ -62,25 +56,27 @@ class Passenger(Agent):
             return
 
         # No optimization if returning home or at home
-        if self.sim_data["start"] == self.sim_data["end"]:
-            self.schedule = []
-            self.event = False
-            return
+        # if self.sim_data["start"] == self.sim_data["end"]:
+        #     self.schedule = []
+        #     self.event = False
+        #     return
 
         # Evaluate remaining schedule. If failure risk is low then do not optimize
         # NOTE I expect that this will improve performance in low-disturbance situations. However, when robots fail or new tasks are added we would like to mandate that an update happens and skip this check.
         # TODO we've removed this chunk for testing
-        # if self.expected_event and "Dist" not in sim_config:
-        #     # [[(self.schedule[i], self.schedule[i+1])
-        #     route_as_edges = [self.schedule]
-        #     #   for i in range(len(self.schedule)-1)]]
-        #     # print("Route check 1:", route_as_edges)
+        # if "Dist" not in sim_config:
+        #     route = self.schedule
         #     planning_task_dict = deepcopy(self.task_dict)
-        #     planning_task_dict[self.sim_data["start"]].location = self.location
-        #     self.sim_data["sim_graph"] = self.generate_graph(planning_task_dict, self.sim_data["start"], self.sim_data["end"],
-        #                                                      filter=False)
+        #     planning_task_dict[self.sim_data["rob_task"]] = Task(
+        #         self.sim_data["rob_task"], self.location, 0, 1)
+
+        #     self.sim_data["sim_graph"] = self.generate_graph(
+        #         planning_task_dict, self.sim_data["rob_task"], self.sim_data["end"], filter=False)
+
+        #     route = [self.sim_data["rob_task"]] + route
+        #     print("Evaluating", route)
         #     _, rel = fast_simulation(
-        #         route_as_edges, self.sim_data["sim_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])
+        #         [route], self.sim_data["sim_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])
 
         #     if rel > self.merger_params["rel_thresh"]:
         #         self.event = False
@@ -91,15 +87,16 @@ class Passenger(Agent):
 
         # Send schedule request
         if "Hybrid2" in sim_config:
-            content = ("Schedule Request",
-                       self.sim_data["budget"],
-                       self.schedule,
-                       self.location
+            content = (self.id,
+                       self.sim_data["m_id"],
+                       "Schedule Request",
+                       (self.sim_data["budget"],
+                        self.schedule,
+                        self.location)
                        )
 
-            self.send_message(comms_mgr,
-                              self.sim_data["m_id"],
-                              content)
+            self.send_msg_up_chain(comms_mgr, content)
+
         # Load search tree
         data = self.solver_params
         # print("Generating graph...")
@@ -132,12 +129,10 @@ class Passenger(Agent):
             # print("Iter complete, doing comms...")
             # NOTE removed comms stuff here because unrealistic. Handling elsewhere.
             # TODO test with comms exchange removed during planning
-            content = ("initiate", tree.my_act_dist)
-            for target in self.neighbors_status:
-                if self.neighbors_status[target] and target != self.sim_data["m_id"]:
-                    self.send_message(comms_mgr,
-                                      target,
-                                      ("initiate", tree.my_act_dist))
+            # content = (self.id, self.sim_data["m_id"], "Initiate",
+            #            (self.id, tree.my_act_dist))
+            # self.send_msg_up_chain(comms_mgr, content)
+
         for sched in tree.my_act_dist.X:
             if sched.action_seq[0] == self.sim_data["rob_task"]:
                 sched.action_seq.pop(0)
@@ -146,17 +141,22 @@ class Passenger(Agent):
         if "Hybrid" in sim_config:
             self._update_my_best_action_dist(tree.my_act_dist)
             # Send updated distro to M for use in scheduling other robots
-            content = ("Update", self.my_action_dist)
-            self.send_message(
-                comms_mgr, self.sim_data["m_id"], content)
         else:  # For distributed-only
             self.my_action_dist = tree.my_act_dist
 
+        # Send up to mothership, which then sends to other agents
+        # TODO (I think this happens? Check to be sure)
+        content = (self.id, self.sim_data["m_id"],
+                   "Update", (self.id, self.my_action_dist))
+        self.send_msg_up_chain(comms_mgr, content)
+
         # Send new action dist to other agents
-        content = ("Update", self.my_action_dist)
-        for target in self.neighbors_status:
-            if self.neighbors_status[target] and target != self.sim_data["m_id"]:
-                self.send_message(comms_mgr, target, content)
+        # for target in self.agent_list:
+        #     if target.id != self.id:
+        #         content = (self.id, target.id, "Update",
+        #                    (self.id, self.my_action_dist))
+        #         self.broadcast_msg_to_neighbors(comms_mgr,
+        #                                         content)
 
         # Select schedule to be used by agent
         self.schedule = self.my_action_dist.best_action().action_seq[:]
@@ -168,7 +168,7 @@ class Passenger(Agent):
 
     # === ACTIONS ===
 
-    def action_update(self, true_graph, comms_mgr, agent_list, sim_config):
+    def action_update(self, comms_mgr):
         """
         Update action according to current agent status and local schedule
         """
@@ -178,16 +178,16 @@ class Passenger(Agent):
         self.task_dict[self.sim_data["rob_task"]].location = self.location
 
         # === BREAKING CRITERIA ===
-        # If out of energy, don't do anything
-        if self.sim_data["budget"] < 0 and not self.finished:
-            self.action[0] = self.IDLE
-            self.dead = True
+        if self.finished or self.dead:
+            # print(self.id, "Finished/Dead! Finished:",
+            #       self.finished, " Dead:", self.dead)
             return
 
-        # If home and idle with no schedule, do nothing
-        if (self.action[0] == self.IDLE
-                and self.action[1] == self.sim_data["end"]):
-            self.finished = True
+        # If out of energy, don't do anything
+        if self.sim_data["budget"] < 0 and not self.finished:
+            print(self.id, "Dead!")
+            self.action[0] = self.IDLE
+            self.dead = True
             return
 
         # If waiting for init schedule command from comms
@@ -198,7 +198,7 @@ class Passenger(Agent):
                 return
 
         if self.action[0] == self.IDLE and len(self.schedule) > 0:
-            print("Traveling to first task in sched:", self.schedule)
+            # print("Traveling to first task in sched:", self.schedule)
             # Start tour & remove first element from schedule
             self.action[0] = self.TRAVELING
             # leaving = self.schedule.pop(0)
@@ -210,19 +210,23 @@ class Passenger(Agent):
             # for state in self.my_action_dist.X:
             #     state.action_seq.pop(0)
 
-            if self.sim_data["basic"]:
-                edge = (leaving, self.action[1])
-                # print(self.id, "Traveling to new task on edge", edge)
-                self.travel_remaining = true_graph.get_edge_mean(edge)
+            # if self.sim_data["basic"]:
+            #     edge = (leaving, self.action[1])
+            #     # print(self.id, "Traveling to new task on edge", edge)
+            #     self.travel_remaining = true_graph.get_edge_mean(edge)
 
-                if leaving in self.sim_data["graph"].vertices:
-                    self.sim_data["graph"].vertices.remove(leaving)
-                    if leaving not in self.completed_tasks:
-                        self.completed_tasks.append(leaving)
-                self.sim_data["graph"].edges.remove(edge)
+            #     if leaving in self.sim_data["graph"].vertices:
+            #         self.sim_data["graph"].vertices.remove(leaving)
+            #         if leaving not in self.completed_tasks:
+            #             self.completed_tasks.append(leaving)
+            #     self.sim_data["graph"].edges.remove(edge)
 
             # self.task_dict[leaving].complete = True  # Mark task complete
-            self.sim_data["start"] = self.action[1]
+            # self.sim_data["start"] = self.action[1]
+
+        if self.action[0] == self.IDLE:
+            # print(self.id, "Resuming travel to", self.action[1])
+            self.action[0] = self.TRAVELING
 
         task = self.task_dict[self.action[1]]
         arrived = False
@@ -254,11 +258,13 @@ class Passenger(Agent):
             # self.event = True
             self.action[0] = self.IDLE
             # Mark task complete
-            self.completed_tasks.append(self.action[1])
+            self.glob_completed_tasks.append(self.action[1])
             self.task_dict[self.action[1]].complete = True
-            self.sim_data["start"] = self.action[1]
-            content = ("Complete Task", self.action[1])
-            self.broadcast_message(comms_mgr, agent_list, sim_config, content)
+            self.stored_reward_sum += self.task_dict[self.action[1]].reward
+            # self.sim_data["start"] = self.action[1]
+            content = (
+                self.id, self.sim_data["m_id"], "Complete Task", self.glob_completed_tasks)
+            self.send_msg_up_chain(comms_mgr, content)
 
         # 3) Otherwise continue doing work
         elif self.action[0] == self.WORKING and self.work_remaining > 0:
@@ -266,114 +272,180 @@ class Passenger(Agent):
             # print(self.id, "Work in progress")
             self.work_remaining -= 1
 
+        # If arrived at home, set finished to true
+        if (arrived and self.action[0] == self.IDLE
+                and self.action[1] == self.sim_data["end"]):
+            self.finished = True
+            return
+
         # print("Agent", self.id, " Updated action is", self.action,
         #       " | Schedule:", self.schedule)
 
+    # === COMMS FUNCTIONS ===
+
+    def process_msg_content(self, comms_mgr: CommsManager, origin, tag, data):
+        super().process_msg_content(comms_mgr, origin, tag, data)
+
+        # Message has arrived at destination
+        if origin == self.sim_data["m_id"]:
+            # Processing messages received from origin mothership
+            print(self.id, "!!! Received M update of tag:", tag)
+            if tag == "Dead":
+                if data[0] == self.id:
+                    return
+                if len(self.stored_act_dists[data[0]].best_action().action_seq) > 0:
+                    self.stored_act_dists[data[0]] = ActionDistribution(
+                        [State([], -1)], [1])
+                    # self.event = True
+                    # self.expected_event = False
+            elif tag == "Initiate":
+                self.stored_act_dists[data[0]] = data[1]
+                if self.my_action_dist != None:
+                    content = (self.id, self.sim_data["m_id"], "Update",
+                               (self.id, self.my_action_dist))
+                    self.send_msg_up_chain(comms_mgr, content)
+            elif tag == "Update" and data[0] == self.id:
+                # Receiving own schedule
+                # Compare schedule to stored elites, update action distro
+                self._update_my_best_action_dist(data[1], force_use=True)
+                # Share updated distro # TODO - is this necessary? Handle instead in update_act_dist?
+                # content = (self.id, self.sim_data["m_id"], "Update",
+                #            (self.id, self.my_action_dist))
+                # self.broadcast_msg_to_neighbors(
+                #     comms_mgr, content)
+            elif tag == "Update" and data[0] != self.id:
+                # Receiving other robot's schedule
+                self.stored_act_dists[data[0]] = data[1]
+        else:
+            # Processing messages received from origin other groups
+            if tag == "Update":
+                print(self.id, "!!! Received act dist update for",
+                      data[0], ":", data[1])
+                self.stored_act_dists[data[0]] = data[1]
+
+            # Return copy of current act dis if sending agent has initiated comms
+            elif tag == "Initiate":
+                # self.stored_act_dists[data[0]] = data[1]
+                if self.my_action_dist != None:
+                    content = (self.id, self.sim_data["m_id"], "Update",
+                               (self.id, self.my_action_dist))
+                    self.send_msg_up_chain(comms_mgr, content)
+
+            elif tag == "Dead":
+                # TODO maybe give further consideration to difference between Dead and Update
+                if data[0] == self.id:
+                    return
+                if len(self.stored_act_dists[data[0]].best_action().action_seq) > 0:
+                    self.stored_act_dists[data[0]] = ActionDistribution(
+                        [State([], -1)], [1])
+                    # self.event = True
+                    # self.expected_event = False
+
+            elif tag == "Complete Task":
+                for task in data:
+                    if task not in self.glob_completed_tasks:
+                        self.glob_completed_tasks.append(task)
+                    self.task_dict[task].complete = True
+                print(self.id, "!!! Received task complete:", data)
+                # if self.sim_data["basic"]:
+                #     if msg.content[1] in self.sim_data["graph"].vertices:
+                #         self.sim_data["graph"].vertices.remove(msg.content[1])
+
     # === FUNCTIONS FOR EXPLORING SIMULATION ===
 
-    def broadcast_message(self, comms_mgr, agent_list, sim_config, content):
-        for target in agent_list:
-            if target.id != self.id:
-                self.send_message(comms_mgr,
-                                  target.id,
-                                  content)
-        if "Hybrid" in sim_config:
-            self.send_message(
-                comms_mgr, self.sim_data["m_id"], content)
+    # def have_failure(self, comms_mgr, agent_list, sim_config, ):
+    #     self.action[0] = self.IDLE
+    #     self.dead = True
+    #     self.sim_data["budget"] = -1
+    #     print("!! ROBOT", self.id, " FAILURE")
 
-    def have_failure(self, comms_mgr, agent_list, sim_config, ):
-        self.action[0] = self.IDLE
-        self.dead = True
-        self.sim_data["budget"] = -1
-        print("!! ROBOT", self.id, " FAILURE")
+    #     # NOTE communicates that failure has occurred
+    #     # Send out an empty action distro to all agents and mothership
+    #     self.my_action_dist = ActionDistribution([State([], -1)], [1])
+    #     content = "Dead"
+    #     self.broadcast_message(comms_mgr, agent_list, sim_config, content)
 
-        # NOTE communicates that failure has occurred
-        # Send out an empty action distro to all agents and mothership
-        self.my_action_dist = ActionDistribution([State([], -1)], [1])
-        content = "Dead"
-        self.broadcast_message(comms_mgr, agent_list, sim_config, content)
+    # def failure_update(self, comms_mgr, agent_list, sim_config):
+    #     if self.dead:
+    #         content = "Dead"
 
-    def failure_update(self, comms_mgr, agent_list, sim_config):
-        if self.dead:
-            content = "Dead"
+    #         self.broadcast_message(comms_mgr, agent_list, sim_config, content)
 
-            self.broadcast_message(comms_mgr, agent_list, sim_config, content)
+    # def random_failure(self, comms_mgr, agent_list, sim_config, robot_fail_prob=0.0):
+    #     """
+    #     Active robots may incur random failures, with varying effects on performance
+    #     """
+    #     if self.action[0] != self.IDLE:
+    #         sample = np.random.random()
+    #         if sample > robot_fail_prob:
+    #             # No failure
+    #             return
+    #         self.have_failure(comms_mgr, agent_list, sim_config)
 
-    def random_failure(self, comms_mgr, agent_list, sim_config, robot_fail_prob=0.0):
-        """
-        Active robots may incur random failures, with varying effects on performance
-        """
-        if self.action[0] != self.IDLE:
-            sample = np.random.random()
-            if sample > robot_fail_prob:
-                # No failure
-                return
-            self.have_failure(comms_mgr, agent_list, sim_config)
+    # def edge_discover(self, true_graph, comms_mgr, agent_list, sim_config, discovery_prob):
+    #     """
+    #     Active agents may discover random edges with probability discovery_prob
+    #     """
+    #     if self.action[0] != self.IDLE:
+    #         sample = np.random.random()
+    #         # Prob of returning early
+    #         if sample <= discovery_prob:
+    #             return
+    #         # Sample random edge from true graph
+    #         edge = random.choice(true_graph.edges)
+    #         self.sim_data["graph"].cost_distributions[edge] = true_graph.cost_distributions[edge]
 
-    def edge_discover(self, true_graph, comms_mgr, agent_list, sim_config, discovery_prob):
-        """
-        Active agents may discover random edges with probability discovery_prob
-        """
-        if self.action[0] != self.IDLE:
-            sample = np.random.random()
-            # Prob of returning early
-            if sample <= discovery_prob:
-                return
-            # Sample random edge from true graph
-            edge = random.choice(true_graph.edges)
-            self.sim_data["graph"].cost_distributions[edge] = true_graph.cost_distributions[edge]
+    #         content = ("Edge", edge, true_graph.cost_distributions[edge])
 
-            content = ("Edge", edge, true_graph.cost_distributions[edge])
+    #         for target in agent_list:
+    #             if target.id != self.id:
+    #                 self.send_message(comms_mgr, target.id, content)
 
-            for target in agent_list:
-                if target.id != self.id:
-                    self.send_message(comms_mgr, target.id, content)
+    #         if "Hybrid" in sim_config:
+    #             self.send_message(comms_mgr, -1, content)
 
-            if "Hybrid" in sim_config:
-                self.send_message(comms_mgr, -1, content)
+    # def update_position_mod_vector(self):
+    #     if self.sim_data["basic"]:
+    #         print("No pos vector because basic sim")
+    #         return
 
-    def update_position_mod_vector(self):
-        if self.sim_data["basic"]:
-            print("No pos vector because basic sim")
-            return
+    #     dest_loc = self.task_dict[self.action[1]].location
+    #     # Get modification to position assuming travel at constant velocity
+    #     vector = self.env_model.generate_scaled_travel_vector(
+    #         self.location, dest_loc, self.sim_data["velocity"]
+    #     )
+    #     self.position_mod_vector = vector
+    #     # print("Current loc is", self.location, "Destination is", dest_loc)
+    #     # print("Position mod vector is then", vector)
 
-        dest_loc = self.task_dict[self.action[1]].location
-        # Get modification to position assuming travel at constant velocity
-        vector = self.env_model.generate_scaled_travel_vector(
-            self.location, dest_loc, self.sim_data["velocity"]
-        )
-        self.position_mod_vector = vector
-        # print("Current loc is", self.location, "Destination is", dest_loc)
-        # print("Position mod vector is then", vector)
+    # # === Helpers for detailed simulations ===
 
-    # === Helpers for detailed simulations ===
+    # def get_target_location(self):
+    #     if self.sim_data["basic"]:
+    #         print("No target loc because basic sim")
+    #         return
+    #     if self.action[1] == "Init":
+    #         return self.location
+    #     else:
+    #         return self.task_dict[self.action[1]].location
 
-    def get_target_location(self):
-        if self.sim_data["basic"]:
-            print("No target loc because basic sim")
-            return
-        if self.action[1] == "Init":
-            return self.location
-        else:
-            return self.task_dict[self.action[1]].location
-
-    def get_command_velocity(self):
-        """
-        Returns velocity command required to reach waypoint given
-        local flows
-        """
-        if self.sim_data["basic"]:
-            print("No cmd vel because basic sim")
-            return
-        # print("Position Mod:", self.position_mod_vector)
-        # print("Local flow:", self.flow)
-        cmd_vel = tuple(
-            self.position_mod_vector[i] - self.local_flow[i] for i in range(len(self.local_flow))
-        )
-        resultant_cmd_vel = round(
-            math.sqrt(cmd_vel[0] ** 2 + cmd_vel[1] ** 2), 2)
-        # print("Command Vel", cmd_vel)
-        return resultant_cmd_vel
+    # def get_command_velocity(self):
+    #     """
+    #     Returns velocity command required to reach waypoint given
+    #     local flows
+    #     """
+    #     if self.sim_data["basic"]:
+    #         print("No cmd vel because basic sim")
+    #         return
+    #     # print("Position Mod:", self.position_mod_vector)
+    #     # print("Local flow:", self.flow)
+    #     cmd_vel = tuple(
+    #         self.position_mod_vector[i] - self.local_flow[i] for i in range(len(self.local_flow))
+    #     )
+    #     resultant_cmd_vel = round(
+    #         math.sqrt(cmd_vel[0] ** 2 + cmd_vel[1] ** 2), 2)
+    #     # print("Command Vel", cmd_vel)
+    #     return resultant_cmd_vel
 
 
 def generate_passengers_with_data(solver_params, sim_data, merger_params) -> list[Passenger]:
@@ -399,34 +471,3 @@ def generate_passengers_from_config(solver_config_fp,
         solver_config_fp, problem_config_fp)
 
     return generate_passengers_with_data(dec_mcts_data, sim_data, merger_data)
-
-
-# def generate_passengers_for_OceanSim(config_filepath) -> list[Passenger]:
-
-#     pssngr_list = []
-
-#     with open(config_filepath, "r") as f:
-#         config = yaml.safe_load(f)
-
-#         # Environment dimensions for agent models
-#         dims = (
-#             tuple(config["xCoordRange"]),
-#             tuple(config["yCoordRange"]),
-#             tuple(config["zCoordRange"]),
-#         )
-
-#         # Create agents
-#         for i in range(config["num_agents"]):
-#             p = Passenger(
-#                 i, config["energy"], dims, config["start_loc"], config["velocity"]
-#             )
-#             # Load tasks
-#             for task in config["tasks"]:
-#                 for key in task.keys():
-#                     p.load_task(key, task[key]["loc"], task[key]["work"])
-
-#             p.load_task(-1, config["start_loc"], 0)  # load "home" task
-
-#             pssngr_list.append(p)
-
-#     return pssngr_list

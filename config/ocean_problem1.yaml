@@ -19,6 +19,7 @@ basic: False
 # PASSENGER PARAMETERS
 
 num_robots: 4
+support_robots: 5 # per-group support
 budget: 3000 #Wh (robot energy)
 energy_burn_rate: 0.01 # Wh / (m/s)
 velocity: 1000 #m/timeUnit

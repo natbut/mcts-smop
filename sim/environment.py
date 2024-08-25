@@ -227,7 +227,9 @@ class Environment:
             # print('Flow vect at:', local_x, local_y, ' is', local_flow_x, local_flow_y)
             local_flow = [local_flow_x, local_flow_y]
 
-        return np.multiply(self.FLOW_MULTIPLIER, local_flow)
+        modified_flows = np.multiply(self.FLOW_MULTIPLIER, local_flow)
+        
+        return modified_flows
 
     def get_dim_ranges(self):
         x_min = min(self.cropped_coords["x"].values)
@@ -251,7 +253,7 @@ class Environment:
 
         for a in agent_list:
             scaled_travel_vec = a.position_mod_vector
-            target_loc = a.get_target_location()
+            # target_loc = a.get_target_location()
             agent_loc = self.agent_loc_dict[a.id]
 
             # If agent is idle, hold location and power
@@ -274,7 +276,7 @@ class Environment:
 
             elif a.action[0] == a.WORKING:
                 # Else if agent is working, update energy only
-                self.agent_loc_dict[a.id] = target_loc
+                # self.agent_loc_dict[a.id] = target_loc
                 cmd_vel = a.get_command_velocity()
                 # print('Agent', a.id, 'working on', a.action[1])
                 a.reduce_energy(cmd_vel)
@@ -329,6 +331,20 @@ def make_environment_from_config(
             loc[2] = loc[2] + random.randint(10, 1000)
 
             agent_loc_dict[i] = loc
+
+        # Load in support robots - each group has own set of support robots
+        for g_id in range(config["num_robots"]):
+            for i in range(config["support_robots"]):
+
+                loc = list(config["base_loc"])
+                loc[0] = loc[0] + random.randint(10, 500)
+                loc[1] = loc[1] + random.randint(10, 500)
+                loc[2] = loc[2] + random.randint(10, 500)
+
+                id = (g_id, i)
+
+                agent_loc_dict[id] = loc
+
         agent_loc_dict[config["m_id"]] = list(config["base_loc"])
 
     # TODO Process folder of tidal filepaths into list here once we start using time-varying environment

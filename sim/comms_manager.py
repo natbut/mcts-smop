@@ -12,10 +12,19 @@ from sim.environment import Environment
 
 class Message:
 
-    def __init__(self, sender_id: int, receiver_id: int, content=None) -> None:
+    def __init__(self,
+                 sender_id: int,
+                 receiver_id: int,
+                 content=None) -> None:
+        """
+        @param sender_id: ID of agent sending message
+        @param receiver_id: ID of agent targeted to receive message
+        @param content: (origin_id, type, info), where message origin is either mothership or group, type is string descriptor, and info is actual message data
+        """
+
         self.sender_id = sender_id
         self.receiver_id = receiver_id
-        self.content = content
+        self.content = content  # (origin_id, type, info)
 
         self.success_prob = 1.0
         self.delay = 1
@@ -35,7 +44,6 @@ class CommsManager:
                  agent_list,
                  max_range,
                  decay_range,
-                 decay_range_m,
                  max_success_prob,
                  msg_decay_rate,
                  m_id
@@ -48,7 +56,6 @@ class CommsManager:
         self.m_id = m_id
 
         self.DECAY_RANGE = decay_range
-        self.DECAY_RANGE_M = decay_range_m
         self.MAX_SUCCESS_PROB = max_success_prob
         self.MSG_DECAY_RATE = msg_decay_rate
         self.MAX_COMMS_RANGE = max_range
@@ -95,12 +102,8 @@ class CommsManager:
 
         # NOTE Instead of delay, set success prob here
         msg.set_delay(0)  # math.ceil(dist/self.COMMS_RATE))
-        if msg.sender_id == self.m_id or msg.receiver_id == self.m_id:
-            succ_prob = self.MAX_SUCCESS_PROB - \
-                (dist//self.DECAY_RANGE_M)*self.MSG_DECAY_RATE
-        else:
-            succ_prob = self.MAX_SUCCESS_PROB - \
-                (dist//self.DECAY_RANGE)*self.MSG_DECAY_RATE
+        succ_prob = self.MAX_SUCCESS_PROB - \
+            (dist//self.DECAY_RANGE)*self.MSG_DECAY_RATE
         msg.set_success_prob(max(0, succ_prob))
 
         # Add to active messages
@@ -111,6 +114,7 @@ class CommsManager:
 
     def step(self):
         # function to manage message passing with each time step (considering delays, packet drop)
+        self.update_connections()
         # Update message passing
         for i, msg in enumerate(self.active_msgs):
             # Reduce delay if message still passing
@@ -125,9 +129,8 @@ class CommsManager:
                     # Remove & send received message
                     self.agent_dict[msg.receiver_id].receive_message(
                         self, arrive_msg)
-
-        # Update comms graph - handled in main sim
-        # self.update_connections()
+                else:
+                    print("Message failed")
 
 
 class CommsManager_Basic:

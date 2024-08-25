@@ -120,7 +120,7 @@ def calculate_final_potential_reward(task_dict, agent_list):
     # Return sum of reward for each unique task visited (duplicates don't reward)
     all_tasks_visited = []
     for a in agent_list:
-        all_tasks_visited += a.completed_tasks
+        all_tasks_visited += a.glob_completed_tasks
     unique_tasks_visited = set(all_tasks_visited)
     return sum(task_dict[task_id].reward for task_id in unique_tasks_visited) / sum(task_dict[task_id].reward for task_id in task_dict)
 
@@ -132,9 +132,18 @@ def calculate_final_reward(task_dict, agent_list):
     all_tasks_visited = []
     for a in agent_list:
         if not a.dead:
-            all_tasks_visited += a.completed_tasks
+            all_tasks_visited += a.glob_completed_tasks
     unique_tasks_visited = set(all_tasks_visited)
     return sum(task_dict[task_id].reward for task_id in unique_tasks_visited) / sum(task_dict[task_id].reward for task_id in task_dict)
+
+
+def get_state_reward(test_state, task_dict):
+
+    all_tasks_visited = test_state.action_seq[:]
+
+    unique_visited = set(all_tasks_visited)
+
+    return sum(task_dict[id].reward for id in unique_visited)
 
 
 def sim_util_reward(test_state: State,
@@ -155,9 +164,9 @@ def sim_util_reward(test_state: State,
         # Collect visited tasks with and without robot_i
         tasks_without_robot_i = []
         # Don't count starting tasks
-        all_tasks_visited = test_state.action_seq[1:]
+        all_tasks_visited = test_state.action_seq[:]
         for id in act_dists.keys():
-            scheduled = act_dists[id].random_action().action_seq[1:]
+            scheduled = act_dists[id].random_action().action_seq[:]
             if id != rob_id:
                 tasks_without_robot_i += scheduled
             all_tasks_visited += scheduled
@@ -176,7 +185,7 @@ def sim_util_reward(test_state: State,
             task_dict[id].reward for id in unique_visited_without)
         rews.append(util_rew)
 
-    return np.average(rews)
+    return max(1.0, np.average(rews))
 
 
 def local_util_reward(data: dict, states: dict[State], rob_id):

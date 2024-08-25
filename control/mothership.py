@@ -6,7 +6,7 @@ import numpy as np
 from control.agent import Agent, load_data_from_config
 from control.passenger import Passenger
 from control.task import Task
-from sim.comms_manager import CommsManager, Message
+from sim.comms_manager import CommsManager
 from solvers.masop_solver_config import State
 from solvers.my_DecMCTS import ActionDistribution
 from solvers.sim_brvns import sim_brvns
@@ -16,10 +16,9 @@ class Mothership(Agent):
 
     def __init__(self, id: int, solver_params: dict, sim_data: dict, merger_params: dict, pssngr_list) -> None:
         super().__init__(id, solver_params, sim_data, merger_params)
+        self.type = self.MOTHERSHIP
 
-        self.pssngr_list = pssngr_list
-
-    def solve_team_schedules(self, comms_mgr: CommsManager, agent_list: list[Passenger]):
+    def solve_team_schedules(self, comms_mgr: CommsManager):
         # Get an initial solution
         data = self.solver_params
         self.sim_data["graph"] = self.generate_graph(self.task_dict,
@@ -65,14 +64,12 @@ class Mothership(Agent):
                 [deepcopy(state)], [1])
 
         # Send agent their own plans AND other agents' plans
-        for target in agent_list:
-            for a in agent_list:
-                content = self.stored_act_dists[a.id]
-                self.send_message(comms_mgr,
-                                  target.id,
-                                  (a.id, content))
+        for target in self.group_list:
+            for a in self.group_list:
+                content = (self.id, target.id, "Update",
+                           (a.id, self.stored_act_dists[a.id]))
+                self.send_msg_down_chain(comms_mgr, content)
 
-# Scheduling functions
     def solve_new_single_schedule(self,
                                   comms_mgr: CommsManager,
                                   agent_id,
@@ -80,13 +77,6 @@ class Mothership(Agent):
                                   current_schedule,
                                   starting_location,
                                   act_samples=1):
-
-        # No rescheduling for agents that don't need it
-        # if (not agent.event) or agent.dead or agent.finished:
-        #     return
-
-        if len(current_schedule) <= 1:
-            return
 
         print("Solving centralized schedule...")
 
@@ -96,8 +86,8 @@ class Mothership(Agent):
         planning_task_dict[self.sim_data["rob_task"]] = Task(
             self.sim_data["rob_task"], starting_location, 0, 1)
         # self.sim_data["start"] = "vr"
-        print("Starting Task Location:",
-              planning_task_dict[self.sim_data["rob_task"]].location, " Robot location:", starting_location)
+        # print("Starting Task Location:",
+        #       planning_task_dict[self.sim_data["rob_task"]].location, " Robot location:", starting_location)
 
         # planning_task_dict[starting_task_id].location = starting_location
         self.sim_data["planning_graph"] = self.generate_graph(
@@ -190,37 +180,77 @@ class Mothership(Agent):
         #     self.send_message(comms_mgr,
         #                       target.id,
         #                       (agent_id, action_dist))
-        self.send_message(comms_mgr, agent_id, (agent_id, action_dist))
+        content = (self.id, agent_id, "Update", (agent_id, action_dist))
+        self.send_msg_down_chain(comms_mgr, content)
 
         # NOTE may need to enforce message sending here while not doing threading
         # NOTE though we don't have confirmation that an action_dist was delivered, we save results anyways here to influence scheduling for other agents
         self.stored_act_dists[agent_id] = action_dist  # ActionDistribution(
         # [solution[0]], [1])
 
-    def receive_message(self, comms_mgr: CommsManager, msg: Message):
-        super().receive_message(comms_mgr, msg)
+    def process_msg_content(self, comms_mgr: CommsManager, origin, tag, data):
+        super().process_msg_content(comms_mgr, origin, tag, data)
 
-        # Broadcast actual action dists received from passengers to other passengers
-        if msg.content[0] == "Update":
-            for target in self.pssngr_list:
-                if target.id != msg.sender_id:
-                    self.send_message(comms_mgr,
-                                      target.id,
-                                      (msg.sender_id, msg.content[1]))
-        # Generate new schedules
-        if msg.content[0] == "Schedule Request":
+        # Processing messages received from origin other groups
+        if tag == "Update":
+            print(self.id, "!!! Received act dist update for",
+                  data[0], ":", data[1])
+            self.stored_act_dists[data[0]] = data[1]
+
+            # self.broadcast_message(comms_mgr, self.pssngr_list, content)
+
+            for target in self.group_list:
+                if target.id != origin:
+                    content = (self.id, target.id, "Update", data)
+                    self.send_msg_down_chain(comms_mgr, content)
+
+        # Return copy of current act dis if sending agent has initiated comms
+        elif tag == "Initiate":
+            # self.stored_act_dists[data[0]] = data[1]
+            # TODO THIS SHOULD FORWARD A MESSAGE RATHER THAN PROCESS IT
+            # if self.my_action_dist != None:
+            for target in self.group_list:
+                if target.id != origin:
+                    content = (self.id, target.id, "Initiate", data)
+                    self.send_msg_down_chain(comms_mgr, content)
+
+        elif tag == "Dead":
+            # TODO maybe give further consideration to difference between Dead and Update
+            if data[0] == self.id:
+                return
+            if len(self.stored_act_dists[data[0]].best_action().action_seq) > 0:
+                self.stored_act_dists[data[0]] = ActionDistribution(
+                    [State([], -1)], [1])
+                # self.event = True
+                # self.expected_event = False
+
+            for target in self.group_list:
+                if target.id != origin:
+                    content = (self.id, target.id, "Dead", data)
+                    self.send_msg_down_chain(comms_mgr, content)
+
+        elif tag == "Complete Task":
+            for task in data:
+                if task not in self.glob_completed_tasks:
+                    self.glob_completed_tasks.append(task)
+                    self.task_dict[task].complete = True
+            # if self.sim_data["basic"]:
+            #     if msg.content[1] in self.sim_data["graph"].vertices:
+            #         self.sim_data["graph"].vertices.remove(msg.content[1])
+            for target in self.group_list:
+                if target.id != origin:
+                    content = (self.id, target.id, "Complete Task", data)
+                    self.send_msg_down_chain(comms_mgr, content)
+
+        elif tag == "Schedule Request":
+            print(self.id, " received Schedule Request")
+            # Generate new schedules
             self.solve_new_single_schedule(comms_mgr,
-                                           msg.sender_id,
-                                           msg.content[1],
-                                           msg.content[2],
-                                           msg.content[3],
+                                           origin,
+                                           data[0],
+                                           data[1],
+                                           data[2],
                                            )
-
-        if msg.content == "Dead":
-            for target in self.pssngr_list:
-                if target.id != msg.sender_id:
-                    content = (msg.sender_id, msg.content)
-                    self.send_message(comms_mgr, target.id, content)
 
 
 def generate_mothership_with_data(id, solver_params, sim_data, merger_params, pssngr_list) -> Mothership:
