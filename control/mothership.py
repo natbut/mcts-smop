@@ -17,6 +17,10 @@ class Mothership(Agent):
     def __init__(self, id: int, solver_params: dict, sim_data: dict, merger_params: dict, pssngr_list) -> None:
         super().__init__(id, solver_params, sim_data, merger_params)
         self.type = self.MOTHERSHIP
+        self.added_tasks = []
+        self.sched_cooldown_dict = {}
+        for rob in pssngr_list:
+            self.sched_cooldown_dict[rob.id] = 0  # budget at last request
 
     def solve_team_schedules(self, comms_mgr: CommsManager):
         # Get an initial solution
@@ -41,7 +45,7 @@ class Mothership(Agent):
                                    data["beta"],
                                    data["k_initial"],
                                    data["k_max"],
-                                   data["t_max"],
+                                   data["t_max_init"],
                                    data["explore_iters"],
                                    data["intense_iters"]
                                    )
@@ -85,9 +89,6 @@ class Mothership(Agent):
         planning_task_dict = deepcopy(self.task_dict)
         planning_task_dict[self.sim_data["rob_task"]] = Task(
             self.sim_data["rob_task"], starting_location, 0, 1)
-        # self.sim_data["start"] = "vr"
-        # print("Starting Task Location:",
-        #       planning_task_dict[self.sim_data["rob_task"]].location, " Robot location:", starting_location)
 
         # planning_task_dict[starting_task_id].location = starting_location
         self.sim_data["planning_graph"] = self.generate_graph(
@@ -102,15 +103,13 @@ class Mothership(Agent):
         data["num_robots"] = 1
 
         # Reduce vertices to only available tasks
-        # # This encompasses tasks that M has been told are complete PLUS those that M believes to be scheduled by other agents
-        # self.completed_tasks = list(set(
-        #     self.completed_tasks + agent.completed_tasks))
+        # This encompasses tasks that M has been told are complete PLUS those that M believes to be scheduled by other agents
 
         # Planning with multiple samples from stored act dists to get an action_dist of best solutions
         sols = []
         rews = []
         rels = []
-        for _ in range(act_samples):
+        for _ in range(self.solver_params["act_samples"]):
             alloc_tasks = []
             for rob_id, act_dist in self.stored_act_dists.items():
                 if rob_id != agent_id:
@@ -166,24 +165,115 @@ class Mothership(Agent):
         # NOTE we are now using rew+rel as score for determining q vals in hybrid approach - these are also re-evaluated when this message is received by agent using agent's local graph
         rews = np.array(self.normalize(rews))
         rels = np.array(self.normalize(rels))
-        scores = rews + (rels * self.merger_params["rel_mod"])
+        scores = rews * rels
         action_dist = ActionDistribution(sols, scores)
 
-        # self.send_message(comms_mgr,
-        #                   agent.id,
-        #                   (agent.id, action_dist))
-
         # Send action_dist to all robots
-        # TODO I think this is causing confusion in low-comms hybrid replanning because it is not the actual action_dist that an agent is using. We may want to only broadcast actual action_dists received from an agent in "Update" step.
-
-        # for target in self.pssngr_list:
-        #     self.send_message(comms_mgr,
-        #                       target.id,
-        #                       (agent_id, action_dist))
         content = (self.id, agent_id, "Update", (agent_id, action_dist))
         self.send_msg_down_chain(comms_mgr, content)
 
-        # NOTE may need to enforce message sending here while not doing threading
+        # NOTE though we don't have confirmation that an action_dist was delivered, we save results anyways here to influence scheduling for other agents
+        self.stored_act_dists[agent_id] = action_dist  # ActionDistribution(
+        # [solution[0]], [1])
+
+    def solve_new_schedules_subset(self,
+                                   comms_mgr: CommsManager,
+                                   agent_id,
+                                   budget,
+                                   current_schedule,
+                                   starting_location,
+                                   act_samples=1):
+
+        print("Solving centralized schedule...")
+
+        # Set up solver params
+        data = self.solver_params
+        planning_task_dict = deepcopy(self.task_dict)
+        planning_task_dict[self.sim_data["rob_task"]] = Task(
+            self.sim_data["rob_task"], starting_location, 0, 1)
+
+        # planning_task_dict[starting_task_id].location = starting_location
+        self.sim_data["planning_graph"] = self.generate_graph(
+            planning_task_dict,
+            self.sim_data["rob_task"],
+            self.sim_data["end"],
+            filter=True
+        )
+        data["end"] = self.sim_data["end"]
+        data["budget"] = budget
+        data["start"] = self.sim_data["rob_task"]
+        data["num_robots"] = 1
+
+        # Reduce vertices to only available tasks
+        # This encompasses tasks that M has been told are complete PLUS those that M believes to be scheduled by other agents
+
+        # Planning with multiple samples from stored act dists to get an action_dist of best solutions
+        sols = []
+        rews = []
+        rels = []
+        for _ in range(self.solver_params["act_samples"]):
+            alloc_tasks = []
+            for rob_id, act_dist in self.stored_act_dists.items():
+                if rob_id != agent_id:
+                    alloc_tasks += act_dist.random_action().action_seq[:]
+                    # TODO: Do random_action here if doing many samples
+
+            alloc_tasks = set(alloc_tasks)  # + self.completed_tasks)
+
+            # print("Reduced set:", alloc_tasks)
+            # print("Tasks to remove:", alloc_tasks)
+
+            data["planning_graph"] = deepcopy(self.sim_data["planning_graph"])
+            for v in alloc_tasks:
+                if v in data["planning_graph"].vertices:
+                    if v != data["end"] and v != data["start"]:
+                        data["planning_graph"].vertices.remove(v)
+
+            print("M Planning with:", data["planning_graph"].vertices)
+
+            if len(data["planning_graph"].vertices) == 0:
+                continue
+
+            solution, rew, rel = sim_brvns(data["planning_graph"],
+                                           data["budget"],
+                                           data["num_robots"],
+                                           data["start"],
+                                           data["end"],
+                                           data["alpha"],
+                                           data["beta"],
+                                           data["k_initial"],
+                                           data["k_max"],
+                                           data["t_max"],
+                                           data["explore_iters"],
+                                           data["intense_iters"],
+                                           )
+
+            if len(solution) == 0:
+                continue
+
+            sols.append(solution[0])
+            rews.append(rew)
+            rels.append(rel)
+
+        print("Schedules solved:", [s.action_seq for s in sols])
+        for s in sols:
+            if s.action_seq[0] == self.sim_data["rob_task"]:
+                s.action_seq.pop(0)
+
+        if len(sols) == 0:
+            return
+
+        # Update action distribution
+        # NOTE we are now using rew+rel as score for determining q vals in hybrid approach - these are also re-evaluated when this message is received by agent using agent's local graph
+        rews = np.array(self.normalize(rews))
+        rels = np.array(self.normalize(rels))
+        scores = rews * rels
+        action_dist = ActionDistribution(sols, scores)
+
+        # Send action_dist to all robots
+        content = (self.id, agent_id, "Update", (agent_id, action_dist))
+        self.send_msg_down_chain(comms_mgr, content)
+
         # NOTE though we don't have confirmation that an action_dist was delivered, we save results anyways here to influence scheduling for other agents
         self.stored_act_dists[agent_id] = action_dist  # ActionDistribution(
         # [solution[0]], [1])
@@ -193,8 +283,8 @@ class Mothership(Agent):
 
         # Processing messages received from origin other groups
         if tag == "Update":
-            print(self.id, "!!! Received act dist update for",
-                  data[0], ":", data[1])
+            # print(self.id, "!!! Received act dist update for",
+            #       data[0], ":", data[1])
             self.stored_act_dists[data[0]] = data[1]
 
             # self.broadcast_message(comms_mgr, self.pssngr_list, content)
@@ -243,14 +333,16 @@ class Mothership(Agent):
                     self.send_msg_down_chain(comms_mgr, content)
 
         elif tag == "Schedule Request":
-            print(self.id, " received Schedule Request")
+            # print(self.id, " received Schedule Request")
             # Generate new schedules
-            self.solve_new_single_schedule(comms_mgr,
-                                           origin,
-                                           data[0],
-                                           data[1],
-                                           data[2],
-                                           )
+            if self.sched_cooldown_dict[origin] != data[0]:
+                self.sched_cooldown_dict[origin] == data[0]
+                self.solve_new_single_schedule(comms_mgr,
+                                               origin,
+                                               data[0],
+                                               data[1],
+                                               data[2],
+                                               )
 
 
 def generate_mothership_with_data(id, solver_params, sim_data, merger_params, pssngr_list) -> Mothership:
@@ -269,10 +361,11 @@ def generate_mothership_with_data(id, solver_params, sim_data, merger_params, ps
 def gen_mother_from_config(solver_config_fp,
                            problem_config_fp,
                            #    planning_graph,
-                           pssngr_list) -> Mothership:
-
+                           pssngr_list,
+                           rand_base=None) -> Mothership:
+    print("Load mothership...")
     sim_data, _, sim_brvns_data, merger_params = load_data_from_config(
-        solver_config_fp, problem_config_fp)
+        solver_config_fp, problem_config_fp, rand_base)
 
     return generate_mothership_with_data(sim_data["m_id"],
                                          sim_brvns_data,

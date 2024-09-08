@@ -10,8 +10,8 @@ from control.task import Task
 
 class EnvironmentModel:
     def __init__(self, y_dim, x_dim, mean=0, variance=0):
-        self.rows = y_dim
-        self.cols = x_dim
+        self.rows = y_dim + 1
+        self.cols = x_dim + 1
         # Initialize the lattice with vectors (x, y) where both x and y are normally distributed
         # np.random.normal(mean, variance, (rows, cols, 2))
         self.vec_means = np.full((self.rows, self.cols, 2), mean, dtype=float)
@@ -26,7 +26,10 @@ class EnvironmentModel:
         """
         location = observation[0]
         flow_comps = observation[1]
-        x, y = location  # TODO will need to update for 3D case
+        # Limit placement to grid boundary
+        # TODO will need to update for 3D case
+        x = min(self.rows-1, location[0])
+        y = min(self.cols-1, location[1])
         obs_x, obs_y = flow_comps
 
         # Update the mean and variance at the observed cell
@@ -77,7 +80,10 @@ class EnvironmentModel:
         x_model = int(self.cols * x_scaling)
         y_model = int(self.rows * y_scaling)
 
-        return x_model, y_model
+        x = min(self.rows-1, x_model)
+        y = min(self.cols-1, y_model)
+
+        return x, y
 
     def generate_scaled_travel_vector(self,
                                       start_loc,
@@ -126,7 +132,7 @@ class EnvironmentModel:
         @returns (distance_mean, distance_variation)
         """
         # Sum the means and sum the variances
-        THRESHOLD = 1000  # TODO
+        THRESHOLD = 1.25*agent_vel  # TODO
 
         # print("Edge from", loc1, "to", loc2, ":")
         travel_vec = np.subtract(loc1, loc2)
@@ -155,6 +161,7 @@ class EnvironmentModel:
                 env_dim_ranges, current_env_loc)
             # print("Agent current loc in model:", current_model_loc)
             # y,x for row, col
+
             if disp:
                 print("Adding", self.vec_means[current_model_loc[1],
                                                current_model_loc[0]], " to", flow_means_sum)

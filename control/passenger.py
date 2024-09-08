@@ -3,10 +3,8 @@ from copy import deepcopy
 from control.agent import Agent, load_data_from_config
 from control.task import Task
 from sim.comms_manager import CommsManager
-from solvers.masop_solver_config import State, fast_simulation
+from solvers.masop_solver_config import State
 from solvers.my_DecMCTS import ActionDistribution, Tree
-
-# TODO: Think about how to share completed tasks between agents
 
 
 class Passenger(Agent):
@@ -23,7 +21,6 @@ class Passenger(Agent):
         self.schedule = []
 
         # Passenger action variables
-        self.dead = False
         self.finished = False
         self.work_remaining = 0
 
@@ -54,12 +51,6 @@ class Passenger(Agent):
         # No optimization needed if no events or are dead/finished
         if (not self.event) or self.dead or self.finished:
             return
-
-        # No optimization if returning home or at home
-        # if self.sim_data["start"] == self.sim_data["end"]:
-        #     self.schedule = []
-        #     self.event = False
-        #     return
 
         # Evaluate remaining schedule. If failure risk is low then do not optimize
         # NOTE I expect that this will improve performance in low-disturbance situations. However, when robots fail or new tasks are added we would like to mandate that an update happens and skip this check.
@@ -97,22 +88,34 @@ class Passenger(Agent):
 
             self.send_msg_up_chain(comms_mgr, content)
 
+            # TODO ADDED PRIORITY FOR M SCHEDULES
+            if not self.event:
+                return
+
         # Load search tree
         data = self.solver_params
         # print("Generating graph...")
         planning_task_dict = deepcopy(self.task_dict)
         planning_task_dict[self.sim_data["rob_task"]] = Task(
             self.sim_data["rob_task"], self.location, 0, 1)
-        self.sim_data["start"] = self.sim_data["rob_task"]
+        if self.action[1] != "Init":
+            self.sim_data["start"] = self.sim_data["rob_task"]
         # planning_task_dict[self.sim_data["start"]].location = self.location
         self.sim_data["plan_graph"] = self.generate_graph(planning_task_dict,
                                                           self.sim_data["start"], self.sim_data["end"],
                                                           filter=True)
+
+        if self.action[1] == "Init":
+            self.sim_data["plan_graph"].vertices.remove(
+                self.sim_data["rob_task"])
+            planning_task_dict.pop(self.sim_data["rob_task"])
+
         data["task_dict"] = planning_task_dict
         data["graph"] = self.sim_data["plan_graph"]
         data["start"] = self.sim_data["start"]
         data["end"] = self.sim_data["end"]
         data["budget"] = self.sim_data["budget"]
+        data["sim_iters"] = self.solver_params["sim_iters"]
 
         print("Distr scheduling with", data["graph"].vertices)
 
@@ -161,6 +164,10 @@ class Passenger(Agent):
         # Select schedule to be used by agent
         self.schedule = self.my_action_dist.best_action().action_seq[:]
         print("!! Schedule selected:", self.schedule, "\n")
+
+        # Advance age of stored schedules
+        for state in self.my_action_dist.X:
+            state.age += 1
 
         # Remove event flag once schedule is updated
         self.event = False
@@ -261,9 +268,10 @@ class Passenger(Agent):
             self.glob_completed_tasks.append(self.action[1])
             self.task_dict[self.action[1]].complete = True
             self.stored_reward_sum += self.task_dict[self.action[1]].reward
-            # self.sim_data["start"] = self.action[1]
+            # content = (
+            #     self.id, self.sim_data["m_id"], "Complete Task", self.glob_completed_tasks)
             content = (
-                self.id, self.sim_data["m_id"], "Complete Task", self.glob_completed_tasks)
+                self.id, self.sim_data["m_id"], "Complete Task", [self.action[1]])
             self.send_msg_up_chain(comms_mgr, content)
 
         # 3) Otherwise continue doing work
@@ -275,6 +283,7 @@ class Passenger(Agent):
         # If arrived at home, set finished to true
         if (arrived and self.action[0] == self.IDLE
                 and self.action[1] == self.sim_data["end"]):
+            # if no additional tasks are reachable
             self.finished = True
             return
 
@@ -289,7 +298,7 @@ class Passenger(Agent):
         # Message has arrived at destination
         if origin == self.sim_data["m_id"]:
             # Processing messages received from origin mothership
-            print(self.id, "!!! Received M update of tag:", tag)
+            # print(self.id, "!!! Received M update of tag:", tag)
             if tag == "Dead":
                 if data[0] == self.id:
                     return
@@ -307,7 +316,19 @@ class Passenger(Agent):
             elif tag == "Update" and data[0] == self.id:
                 # Receiving own schedule
                 # Compare schedule to stored elites, update action distro
-                self._update_my_best_action_dist(data[1], force_use=True)
+                if self.last_msg_content == data[1]:
+                    return
+                else:
+                    self.last_msg_content = data[1]
+                    self._update_my_best_action_dist(data[1], force_use=True)
+                # TODO ADDED PRIORITY FOR M SCHEDULES (enforce using if received)
+                # self.my_action_dist = data[1]
+                # self.schedule = self.my_action_dist.best_action().action_seq[:]
+                # self.event = False
+                # Send self update message back up toward mothership
+                # content = (self.id, self.sim_data["m_id"],
+                #            "Update", (self.id, self.my_action_dist))
+                # self.send_msg_up_chain(comms_mgr, content)
                 # Share updated distro # TODO - is this necessary? Handle instead in update_act_dist?
                 # content = (self.id, self.sim_data["m_id"], "Update",
                 #            (self.id, self.my_action_dist))
@@ -316,11 +337,23 @@ class Passenger(Agent):
             elif tag == "Update" and data[0] != self.id:
                 # Receiving other robot's schedule
                 self.stored_act_dists[data[0]] = data[1]
+            elif tag == "New Task":
+                for task in data:
+                    if task.id not in self.task_dict.keys():
+                        self.load_task(task.id,
+                                       task.location,
+                                       task.work,
+                                       task.reward)
+            elif tag == "Complete Task":
+                for task in data:
+                    if task not in self.glob_completed_tasks:
+                        self.glob_completed_tasks.append(task)
+                    self.task_dict[task].complete = True
         else:
             # Processing messages received from origin other groups
             if tag == "Update":
-                print(self.id, "!!! Received act dist update for",
-                      data[0], ":", data[1])
+                # print(self.id, "!!! Received act dist update for",
+                #       data[0], ":", data[1])
                 self.stored_act_dists[data[0]] = data[1]
 
             # Return copy of current act dis if sending agent has initiated comms
@@ -346,7 +379,7 @@ class Passenger(Agent):
                     if task not in self.glob_completed_tasks:
                         self.glob_completed_tasks.append(task)
                     self.task_dict[task].complete = True
-                print(self.id, "!!! Received task complete:", data)
+                # print(self.id, "!!! Received task complete:", data)
                 # if self.sim_data["basic"]:
                 #     if msg.content[1] in self.sim_data["graph"].vertices:
                 #         self.sim_data["graph"].vertices.remove(msg.content[1])
@@ -464,10 +497,11 @@ def generate_passengers_with_data(solver_params, sim_data, merger_params) -> lis
 
 def generate_passengers_from_config(solver_config_fp,
                                     problem_config_fp,
+                                    rand_base=None
                                     # planning_graph
                                     ) -> list[Passenger]:
-
+    print("Load passengers...")
     sim_data, dec_mcts_data, _, merger_data = load_data_from_config(
-        solver_config_fp, problem_config_fp)
+        solver_config_fp, problem_config_fp, rand_base)
 
     return generate_passengers_with_data(dec_mcts_data, sim_data, merger_data)

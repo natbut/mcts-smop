@@ -298,7 +298,7 @@ def shake(solution, k, k_max, graph: Graph, budget, start, end, alpha, beta):
     # Remove nodes/edges currently in new_solution from shake graph
     for route in new_solution:
         for i, vert in enumerate(route):
-            if vert != route[0] and vert != route[-1]:  # TODO do this right
+            if vert != route[0] and vert != route[-1]:
                 shake_graph.vertices.remove(vert)
             # elif i != len(route)-1:
             #     shake_graph.edges.remove((vert, route[i+1]))

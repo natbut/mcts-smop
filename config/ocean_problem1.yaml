@@ -18,11 +18,11 @@ basic: False
 
 # PASSENGER PARAMETERS
 
-num_robots: 4
+num_robots: 6
 support_robots: 5 # per-group support
-budget: 3000 #Wh (robot energy)
+budget: 2000 #Wh (robot energy)
 energy_burn_rate: 0.01 # Wh / (m/s)
-velocity: 1000 #m/timeUnit
+velocity: 2000 #m/timeUnit
 base_loc: # approx starting/ending loc
   - -85000 #X
   - 120000 #Y
@@ -32,8 +32,8 @@ base_loc: # approx starting/ending loc
 # ENVIRONMENT PARAMETERS
 
 xCoordRange:
-  - 100 # X start
-  - 195 # X end
+  - 120 # X start
+  - 190 #195 # X end
 
 yCoordRange:
   - 22 # Y start

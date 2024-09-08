@@ -1,4 +1,5 @@
 import math
+import os
 import random
 
 import numpy as np
@@ -228,7 +229,7 @@ class Environment:
             local_flow = [local_flow_x, local_flow_y]
 
         modified_flows = np.multiply(self.FLOW_MULTIPLIER, local_flow)
-        
+
         return modified_flows
 
     def get_dim_ranges(self):
@@ -242,6 +243,27 @@ class Environment:
             return ((x_min, x_max), (y_min, y_max), (z_min, z_max))  # meters
         else:
             return ((x_min, x_max), (y_min, y_max), (0, 0))
+
+    def setup_random_base_loc(self):
+        ranges = self.get_dim_ranges()
+        base_x = np.random.randint(ranges[0][0], ranges[0][1])
+        base_y = np.random.randint(ranges[1][0], ranges[1][1])
+        if not self.SLICE:
+            base_z = np.random.randint(ranges[2][0], range[2][1])
+        else:
+            base_z = 0
+        base_loc = [base_x, base_y, base_z]
+        self.base_loc = base_loc
+        for a in self.agent_loc_dict.keys():
+            loc = base_loc[:]
+            loc[0] = base_loc[0] + random.randint(10, 1000)
+            loc[1] = base_loc[1] + random.randint(10, 1000)
+            loc[2] = base_loc[2] + random.randint(10, 1000)
+
+            print("setting", a, "start loc to", loc)
+            self.agent_loc_dict[a] = loc
+
+        return base_loc
 
     def step(self, agent_list):
         """
@@ -348,7 +370,10 @@ def make_environment_from_config(
         agent_loc_dict[config["m_id"]] = list(config["base_loc"])
 
     # TODO Process folder of tidal filepaths into list here once we start using time-varying environment
-    tidal_fps = [tidal_folderpath]
+    tidal_fp = random.choice(os.listdir(tidal_folderpath))
+    tidal_fp = os.path.join(tidal_folderpath, tidal_fp)
+    print("Selected flow data file", tidal_fp)
+    tidal_fps = [tidal_fp]
 
     return Environment(
         topo_filepath,

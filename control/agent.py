@@ -36,9 +36,12 @@ class Agent:
         self.group_list = []
 
         self.stored_reward_sum = 1
+        self.last_msg_content = None
 
         self.event = True
         self.expected_event = True
+
+        self.dead = False
 
         if not sim_data["basic"]:
             # Environment status
@@ -73,47 +76,47 @@ class Agent:
         # Current action (Traveling/Working/Idle, Task ID)
         self.action = [self.IDLE, "Init"]
 
-    def _get_valid_schedule_options(self, new_states: list[State]):
+    def _combine_stored_and_new_states(self, new_states: list[State]):
         # Trim down to only valid schedules (consider new states and stored)
 
         states = new_states
         # Add stored states
         if self.my_action_dist != None:
             # Add any currently-stored applicable schedules
-            for state in self.my_action_dist.X:
-                # Allow any states where action[1] appears in the schedule, then trim the front end of the state's schedule to start with action[1]
-                if self.action[1] in state.action_seq:
-                    # NOTE trim to self.action[1]
-                    # NOTE This also kind of happens in action_update
-                    v = state.action_seq[0]
-                    while v != self.action[1]:
-                        state.action_seq.pop(0)
-                        v = state.action_seq[0]
-                    # NOTE budgets updated here?
-                    # state.remaining_budget = self.sim_data["budget"]
-                    states.append(state)
+            for old_state in self.my_action_dist.X:
+                if old_state not in states:
+                    states.append(old_state)
         return states
 
     def _prune_completed_tasks(self, states: list[State]):
         # Remove any completed tasks from proposed schedules
         for state in states:
-            for task in state.action_seq:
-                if self.task_dict[task].complete:
+            # print("Evaluating seq", state.action_seq)
+            for task in self.glob_completed_tasks:  # state.action_seq:
+                # print("Task", task, "Complete?", self.task_dict[task].complete)
+                if task in state.action_seq and task != self.sim_data["end"]:
+                    # print("Removing", task, "from ", state.action_seq)
                     state.action_seq.remove(task)
 
     # TODO this function should be moved to passengers because it uses self.schedule
     def _update_my_best_action_dist(self,
                                     new_act_dist: ActionDistribution,
                                     force_use=False):
-        # TODO Make this more generic to be usable by Mothership?
+
+        # print("Un-pruned new states:", [x.action_seq for x in new_act_dist.X])
+        # print("Un-pruned old states:", [
+        #       x.action_seq for x in self.my_action_dist.X])
+
         self._prune_completed_tasks(new_act_dist.X)
         self._prune_completed_tasks(self.my_action_dist.X)
 
         print("New states to eval:", [x.action_seq for x in new_act_dist.X])
         print("Old states to eval:", [
               x.action_seq for x in self.my_action_dist.X])
-        # states = self._get_valid_schedule_options(new_act_dist.X)
-        states = list(self.my_action_dist.X) + list(new_act_dist.X)
+
+        states = self._combine_stored_and_new_states(new_act_dist.X)
+
+        # states = list(self.my_action_dist.X) + list(new_act_dist.X)
 
         # Evaluate reward for each reliable state schedule
         planning_task_dict = deepcopy(self.task_dict)
@@ -127,20 +130,20 @@ class Agent:
         rels = []
         usable_states = []
 
-        # if force_use:
-        #     for state in new_act_dist.X:
-        #         usable_states.append(state)
-        #         rewards.append(sum(self.task_dict[t].reward for t in state.action_seq))
-        #         rels.append(1.0)
-
         for state in states:
             route = state.action_seq
             # Ensure 1 instance per route is evaluated
             new_route = True
             for test in usable_states:
-                if test.action_seq == route:
+                # Don't evaluate duplicate routes
+                if test.action_seq == route:  # and test.age < state.age:
+                    new_route = False
+            for test_task_id in route:
+                # Exclude routes that contain tasks that we do not have info for
+                if test_task_id not in self.task_dict.keys():
                     new_route = False
             if new_route:
+                age = state.age
                 rel_route = [self.sim_data["rob_task"]] + route
                 print("Evaluating", rel_route)
                 _, rel = fast_simulation(
@@ -148,21 +151,19 @@ class Agent:
 
                 # NOTE DOING LOCAL UTIL REWARDS HERE INSTEAD
                 # NOTE MCTS solver already tries to consider local util, as does Sim-BRVNS. BUT we do this check because we also are checking against old schedules, and they may perform differently given new state info.
-                rew = sim_util_reward(state,
-                                      self.stored_act_dists,
-                                      self.id,
-                                      self.task_dict,
-                                      self.merger_params["mcs_iters"])
+                # rew = sim_util_reward(state,
+                #                       self.stored_act_dists,
+                #                       self.id,
+                #                       self.task_dict,
+                #                       self.merger_params["mcs_iters"])
+                rew = get_state_reward(state, self.task_dict)
 
-                alpha = (rew * rel) / self.stored_reward_sum
-                beta = rew * rel
-                print("Reliability:", rel, " Reward:", rew)
-                print("Alpha:", alpha, " Beta:", beta)
+                alpha = rew * rel  # * max(0.01, (1/age))
+                print("Reliability:", rel, " Reward:", rew, "Alpha:", alpha)
 
-                if rel >= self.merger_params["rel_thresh"]:
-                    # TODO this isn't a correct budget update. Would want to update maybe from fast_sim results
-                    state.remaining_budget = self.sim_data["budget"]
-                    rewards.append(beta)
+                if rel > self.merger_params["rel_thresh"]:
+                    # state.remaining_budget = self.sim_data["budget"]
+                    rewards.append(alpha)
                     rels.append(rel)
                     usable_states.append(state)
 
@@ -170,8 +171,15 @@ class Agent:
 
         # NOTE attempt to GO HOME if no usable schedules
         if len(usable_states) == 0:
-            usable_states.append(
-                State([self.schedule[0], self.sim_data["end"]], self.sim_data["budget"]))
+            if len(self.schedule) == 0:
+                usable_states.append(
+                    State([self.sim_data["end"]], self.sim_data["budget"]))
+            elif self.schedule[0] == self.sim_data["end"]:
+                usable_states.append(
+                    State([self.schedule[0]], self.sim_data["budget"]))
+            else:
+                usable_states.append(
+                    State([self.schedule[0], self.sim_data["end"]], self.sim_data["budget"]))
             rewards.append(1.0)
             rels.append(1.0)
 
@@ -234,7 +242,7 @@ class Agent:
                 continue
             # print(self.id, "broadcasting. Checking status of", target.id)
             if self.neighbors_status[target.id]:
-                print(self.id, "sending message to", target.id)
+                # print(self.id, "sending message to", target.id)
                 self.send_message(comms_mgr,
                                   target.id,
                                   content)
@@ -247,42 +255,46 @@ class Agent:
         # print("Final dest: ", final_dest)
         # Quick sends
         if content[2] == "Update" or content[2] == "Dead":
+            # Share dist scheduling info with available neighbors
             for target in self.agent_list:
                 if target.id != self.id and target.type == self.PASSENGER:
                     if self.neighbors_status[target.id]:
                         self.send_message(comms_mgr, target.id, content)
 
         if self.neighbors_status[final_dest]:
-            print(self.id, "sending",
-                  content[2], "message up to", final_dest)
+            # Send message up to final dest (mothership)
+            # print(self.id, "sending",
+            #       content[2], "message up to", final_dest)
             self.send_message(comms_mgr,
                               final_dest,
                               content)
             return
 
         if self.type == self.PASSENGER:
+            # Send message up to first support robot
             id = (self.id, self.sim_data["support_robots"]-1)
             if self.neighbors_status[id]:
-                print(self.id, "sending",
-                      content[2], "message up to", id)
+                # print(self.id, "sending",
+                #       content[2], "message up to", id)
                 self.send_message(comms_mgr,
                                   id,
                                   content)
                 return
 
         if self.type == self.SUPPORT:
+            # Send message up to next support robot
             id = (self.id[0], self.id[1]-1)
             if id[1] < 0:
                 pass
             elif self.neighbors_status[id]:
-                print(self.id, "sending",
-                      content[2], "message up to", id)
+                # print(self.id, "sending",
+                #       content[2], "message up to", id)
                 self.send_message(comms_mgr,
                                   id,
                                   content)
                 return
 
-        # Broadcast-type sends
+        # Broadcast-type sends if above have all failed
         for target in self.agent_list:
             if target.id == self.id or not self.neighbors_status[target.id]:
                 continue
@@ -294,8 +306,6 @@ class Agent:
                 if target.type == self.SUPPORT and target.id[0] == self.id[0] and target.id[1] < self.id[1]:
                     send_to_target = True
             if send_to_target:
-                print(self.id, "sending",
-                      content[2], "message up to", target.id)
                 self.send_message(comms_mgr,
                                   target.id,
                                   content)
@@ -306,43 +316,48 @@ class Agent:
 
         # Quick sends
         if content[2] == "Update" or content[2] == "Dead":
+            # Share dist scheduling info with available groups (passengers)
             for target in self.agent_list:
                 if target.id != self.id and target.type == self.PASSENGER:
                     if self.neighbors_status[target.id]:
                         self.send_message(comms_mgr, target.id, content)
 
         if self.neighbors_status[final_dest]:
-            print(self.id, "sending",
-                  content[2], "message down to", final_dest)
+            # Send message to final dest (a passenger/group)
+            # print(self.id, "sending",
+            #       content[2], "message down to", final_dest)
             self.send_message(comms_mgr,
                               final_dest,
                               content)
             return
 
         if self.type == self.MOTHERSHIP:
+            # Send message to first robot in chain to final dest
             id = (final_dest, 0)
             if self.neighbors_status[id]:
-                print(self.id, "sending",
-                      content[2], "message down to", id)
+                # print(self.id, "sending",
+                #       content[2], "message down to", id)
                 self.send_message(comms_mgr,
                                   id,
                                   content)
                 return
 
         if self.type == self.SUPPORT:
+            # Send message to next robot in chain to final dest
             id = (self.id[0], self.id[1]+1)
             if id[1] > self.sim_data["support_robots"]-1:
                 pass
             elif self.neighbors_status[id]:
-                print(self.id, "sending",
-                      content[2], "message down to", id)
+                # print(self.id, "sending",
+                #   content[2], "message down to", id)
                 self.send_message(comms_mgr,
                                   id,
                                   content)
                 return
 
-            # Send msg down toward group
+        # Broadcast-type sends if above have all failed
         for target in self.agent_list:
+            # Send msg down toward group
             if target.id == self.id or not self.neighbors_status[target.id]:
                 continue
             send_to_target = False
@@ -353,8 +368,8 @@ class Agent:
                 if target.type == self.SUPPORT and target.id[0] == self.id[0] and target.id[1] > self.id[1]:
                     send_to_target = True
             if send_to_target:
-                print(self.id, "sending",
-                      content[2], "message down to", target.id)
+                # print(self.id, "sending",
+                #       content[2], "message down to", target.id)
                 self.send_message(comms_mgr,
                                   target.id,
                                   content)
@@ -377,6 +392,7 @@ class Agent:
         tag = msg.content[2]
         data = msg.content[3]
 
+        # TODO - probably don't need this mothership bit
         if self.type == self.MOTHERSHIP:
             # If this is the mothership, send down chain
             self.send_msg_down_chain(comms_mgr, msg.content)
@@ -410,6 +426,8 @@ class Agent:
         """Adds a task to this agent's task list"""
         if id not in self.task_dict.keys():
             self.task_dict[id] = Task(id, loc, work, reward)
+        # print("After loading task", id, " new dict for",
+        #       self.id, " is: ", self.task_dict.keys())
 
     def load_tasks_on_agent(self, task_dict: dict[Task]):
         for t_id, task in task_dict.items():
@@ -574,7 +592,7 @@ class Agent:
 
 # Setup functions
 
-def load_data_from_config(solver_config_fp, problem_config_fp):
+def load_data_from_config(solver_config_fp, problem_config_fp, rand_base=None):
     """
     Load in problem and solver data for agents to use during operations
     """
@@ -602,6 +620,8 @@ def load_data_from_config(solver_config_fp, problem_config_fp):
                 "rob_task": prob_config["rob_task"],
                 "support_robots": prob_config["support_robots"]
             }
+            if rand_base:
+                sim_data["base_loc"] = rand_base
 
             merger_data = {"rel_mod": solve_config["rel_mod"],
                            "rel_thresh": solve_config["rel_thresh"],
@@ -613,6 +633,7 @@ def load_data_from_config(solver_config_fp, problem_config_fp):
                              "comm_n": solve_config["comm_n"],
                              "plan_iters": solve_config["planning_iters"],
                              "t_max": solve_config["t_max_decMCTS"],
+                             "sim_iters": solve_config["sim_iters"]
                              }
 
             sim_brvns_data = {"num_robots": prob_config["num_robots"],
@@ -621,8 +642,10 @@ def load_data_from_config(solver_config_fp, problem_config_fp):
                               "k_initial": solve_config["k_initial"],
                               "k_max": solve_config["k_max"],
                               "t_max": solve_config["t_max_simBRVNS"],
+                              "t_max_init": solve_config["t_max_init"],
                               "explore_iters": solve_config["exploratory_mcs_iters"],
                               "intense_iters": solve_config["intensive_mcs_iters"],
+                              "act_samples": solve_config["act_samples"],
                               }
 
     return sim_data, dec_mcts_data, sim_brvns_data, merger_data

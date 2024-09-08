@@ -249,11 +249,12 @@ class Tree:
         avg_reward = 0
         best_reward = float("-Inf")
         best_rollout = None
-        for i in range(nsims):
+        for _ in range(nsims):
             robot_temp_state = self.graph.nodes[start_node]["state"]
             system_state[self.id] = robot_temp_state
             cum_reward = 0
             d = 0  # depth
+            # TESTING ROLLOUTS
             while d < depth:  # also breaks at no available options
                 d += 1
 

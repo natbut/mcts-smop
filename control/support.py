@@ -89,9 +89,11 @@ def generate_supports_with_data(solver_params, sim_data, merger_params) -> list[
 
 def generate_supports_from_config(solver_config_fp,
                                   problem_config_fp,
+                                  rand_base=None
                                   ) -> list[Support]:
 
+    print("Load support...")
     sim_data, dec_mcts_data, _, merger_data = load_data_from_config(
-        solver_config_fp, problem_config_fp)
+        solver_config_fp, problem_config_fp, rand_base)
 
     return generate_supports_with_data(dec_mcts_data, sim_data, merger_data)

@@ -13,10 +13,12 @@ class State:
     def __init__(self, act_seq, budget):
         self.action_seq = act_seq  # ordered list of tasks to visit
         # Expected budget remaining once act_seq is executed (USE ONLY FOR DEC-MCTS)
-        self.remaining_budget = budget
+        # self.remaining_budget = budget
+        self.age = 1
 
     def __str__(self):
-        return "x:" + str(self.action_seq) + " | exp_rem_budget:" + str(self.remaining_budget)
+        # + " | exp_rem_budget:" + str(self.remaining_budget)
+        return "schedule:" + str(self.action_seq)
 
 
 # === GENERAL HELPER FUNCTIONS ===
@@ -61,36 +63,6 @@ def route_stoch_cost(route, graph: Graph):
     Return sum of sampled time to traverse edges and execute tasks in route
     """
     return sum(graph.get_stoch_cost_edgeWork((route[i], route[i+1])) for i in range(len(route)-1))
-
-
-# def route_stoch_reward_budget(solution, graph: Graph, budget):
-#     """
-#     Evaluate cost of each route (list of vertices) in solution using graph. If cost is within budget, add rewards from route to rewards sum. Return sum.
-#     """
-#     all_tasks_successfully_visited = []
-#     fail = 0
-#     rem_budgs = []
-#     for route in solution:
-#         # Only apply tasks if route is a success
-#         cost = route_stoch_cost(route, graph)
-#         if cost < budget:
-#             all_tasks_successfully_visited += route
-#             rem_budgs.append(budget - cost)
-#         else:
-#             fail = 1
-#     unique_tasks_visited = set(all_tasks_successfully_visited)
-#     return sum(graph.rewards[task_id] for task_id in unique_tasks_visited), fail, np.average(rem_budgs)
-
-
-# def fast_sim_get_budget(solution, graph, budget, iterations):
-#     rewards = []
-#     fails = 0
-#     for _ in range(iterations):
-#         rew, fail, avg_rem_budg = route_stoch_reward_budget(
-#             solution, graph, budget)
-#         rewards.append(rew)
-#         fails += fail
-#     return sum(rew for rew in rewards) / iterations, (iterations - fails) / iterations, avg_rem_budg
 
 
 def fast_simulation(solution, graph: Graph, budget, iterations):
@@ -193,19 +165,29 @@ def local_util_reward(data: dict, states: dict[State], rob_id):
     Returns "utility" of rob_id tour, calculated as difference in global reward with and without tour.
     """
     # Return sum of reward for each unique task visited (duplicates don't reward)
-    # TODO improve reward function to prioritize reliability alongside risk
     # NOTE Don't reward tours that exceed budget
-    all_tasks_visited = []
-    tasks_without_robot_i = []
-    for robot in states:
-        if states[robot].remaining_budget > 0:
+    task_dict = data["task_dict"]
+
+    reward_with = []
+    reward_without = []
+    for _ in range(data["sim_iters"]):
+
+        all_tasks_visited = []
+        tasks_without_robot_i = []
+        for robot in states:
+            # if states[robot].remaining_budget > 0:
             if robot != rob_id:
                 tasks_without_robot_i += states[robot].action_seq[:]
             all_tasks_visited += states[robot].action_seq[:]
-    unique_tasks_visited = set(all_tasks_visited)
-    unique_tasks_visited_without = set(tasks_without_robot_i)
-    task_dict = data["task_dict"]
-    return sum(task_dict[task_id].reward for task_id in unique_tasks_visited) - sum(task_dict[task_id].reward for task_id in unique_tasks_visited_without)
+        unique_tasks_visited = set(all_tasks_visited)
+        unique_tasks_visited_without = set(tasks_without_robot_i)
+
+        reward_with.append(
+            sum(task_dict[task_id].reward for task_id in unique_tasks_visited))
+        reward_without.append(
+            sum(task_dict[task_id].reward for task_id in unique_tasks_visited_without))
+
+    return np.linalg.norm(np.array(reward_with) - np.array(reward_without))
 
 
 # === DEC-MCTS HELPER FUNCTIONS ===
@@ -230,7 +212,7 @@ def state_storer(data: dict, parent_state, action, id):
     for i in range(len(actions)-1):
         edge = (actions[i], actions[i+1])
         cost += data["graph"].get_stoch_cost_edgeWork(edge)
-    state.remaining_budget = data["budget"] - cost
+    # state.remaining_budget = data["budget"] - cost
     return state
 
 
@@ -249,10 +231,22 @@ def avail_actions(data, state: State, robot_id):
         if task not in state.action_seq:
             # check if task is reachable within budget
             # back 2 because last action is vg
-            last_action = state.action_seq[-2]
-            cost = graph.get_mean_cost_edgeWork(
-                (last_action, task)) + graph.get_mean_cost_edgeWork((task, data["end"]))
-            if cost < state.remaining_budget:
+            # last_action = state.action_seq[-2]
+            # cost = graph.get_mean_cost_edgeWork(
+            #     (last_action, task)) + graph.get_mean_cost_edgeWork((task, data["end"]))
+            # if cost < state.remaining_budget:
+            #     choices.append(task)
+
+            test_route = state.action_seq[:]
+            test_route.insert(-1, task)
+
+            # print("Avail task", task, " in route", test_route)
+
+            # last_action = robot_state.action_seq[-2]
+            # cost = graph.get_mean_cost_edgeWork(
+            #     (last_action, task)) + graph.get_mean_cost_edgeWork((task, data["end"]))
+            cost = route_det_cost(test_route, graph)
+            if cost < data["budget"]:
                 choices.append(task)
     # print("Given actions", state.action_seq, " we have choices: ", choices)
     return choices
@@ -266,7 +260,6 @@ def sim_get_actions_available(data: dict, states: dict[State], rob_id: int):
 
     # Restrict available actions to those that do not exceed travel budget (is how Dec-MCTS paper formulated it). However, the paper does not enforce returning to a goal location. So we want to restrict to actions where cost to travel to action + cost from action to goal does not exceed remaining budget.
     # NOTE: This may be handled differently once stochastic edges are introduced
-    reachable_unallocated_tasks = []
     graph = data["graph"]
     robot_state = states[rob_id]
 
@@ -277,12 +270,19 @@ def sim_get_actions_available(data: dict, states: dict[State], rob_id: int):
     unique_tasks_allocated = set(all_tasks_allocated)
 
     # print("Tasks allocated:", unique_tasks_allocated)
+    reachable_unallocated_tasks = []
     for task in graph.vertices:
         if task not in unique_tasks_allocated:
-            last_action = robot_state.action_seq[-2]
-            cost = graph.get_mean_cost_edgeWork(
-                (last_action, task)) + graph.get_mean_cost_edgeWork((task, data["end"]))
-            if cost < robot_state.remaining_budget:
+            test_route = robot_state.action_seq[:]
+            test_route.insert(-1, task)
+
+            # print("Testing task", task, " in route", test_route)
+
+            # last_action = robot_state.action_seq[-2]
+            # cost = graph.get_mean_cost_edgeWork(
+            #     (last_action, task)) + graph.get_mean_cost_edgeWork((task, data["end"]))
+            cost = route_det_cost(test_route, graph)
+            if cost < data["budget"]:
                 reachable_unallocated_tasks.append(task)
 
     return reachable_unallocated_tasks

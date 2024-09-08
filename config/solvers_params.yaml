@@ -1,19 +1,22 @@
 # SOLVER PARAMS
 
 # Dec-MCTS
-planning_iters: 30  # dec-mcts planning iters
+planning_iters: 50  # dec-mcts planning iters
 t_max_decMCTS: 10
 comm_n: 5  # Number of Action Sequences to communicate/store in distr
 failure_probability: 0.1  # for stoch analysis of routes
+sim_iters: 10
 
 # Sim-BRVNS
 alpha: 0.85 # (0,1), depending on reward heterogeneity (0 for high heter, 1 for low)
 beta: 0.3  # (0,1), controls greediness in constructive heuristic
 k_initial: 1
 k_max: 10
-t_max_simBRVNS: 20  # Maximum execution time
+t_max_simBRVNS: 10  # Maximum execution time
+t_max_init: 30
 exploratory_mcs_iters: 10
 intensive_mcs_iters: 100
+act_samples: 1
 
 # Merger
 mcs_iters: 50

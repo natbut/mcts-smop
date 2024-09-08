@@ -21,6 +21,7 @@ def plot_results_from_log(log_fp):
     df = pd.read_csv(log_fp)
 
     trial = df["trial"]
+    test = df["test"]
     try:
         best = df["best"]
     except:
@@ -37,6 +38,7 @@ def plot_results_from_log(log_fp):
     title = "Results for test " + name
 
     plot_results(trial,
+                 test,
                  best,
                  frontEndOnly,
                  distrOnly,
@@ -48,6 +50,7 @@ def plot_results_from_log(log_fp):
 
 
 def plot_results(trial,
+                 test,
                  best,
                  frontEnd_results,
                  distrOnly_results,

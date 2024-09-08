@@ -54,34 +54,75 @@ def get_args() -> Namespace:
     return parser.parse_args()
 
 
+def chance_robot_fail(agent_list,
+                      robot_fail_prob,
+                      comms_mgr,
+                      timeStep):
+    # Do fail updates
+    if timeStep % 10 == 0:
+        for a in agent_list:
+            # Potential passenger failure
+            if a.dead and a.type != a.MOTHERSHIP:
+                # Continue attempting to send failure update (occasionally)
+                a.have_failure(comms_mgr)
+
+    # Do random failure
+    sample = np.random.random()
+    # print("Sampled fail prob:", sample)
+    if sample <= robot_fail_prob:
+        rob = np.random.choice(agent_list)
+        print("!!! ROBOT FAILURE")
+        if rob.type != rob.MOTHERSHIP:
+            fail_samp = np.random.random()
+            if fail_samp <= 0.5:
+                # 50% chance total failure
+                rob.have_failure(comms_mgr)
+            else:
+                # 50% chance reduced battery
+                rob.sim_data["budget"] = rob.sim_data["budget"] // 2
+
+
 def chance_task_add(prob_config_fp,
                     environment,
                     task_dict,
-                    agent_list,
-                    num_tasks=1,
+                    mothership,
+                    group_list,
+                    num_tasks_to_add=1,
                     new_task_prob=0.05):
+
     sample = np.random.random()
+    # print("Sampled task prob:", sample)
     if sample <= new_task_prob:
         add_tasks_to_dict(prob_config_fp,
                           environment,
                           task_dict,
-                          num_tasks,
+                          num_tasks_to_add,
                           high_rew=True
                           )
         print("!!! NEW TASK")
-        for a in agent_list:
-            a.load_tasks_on_agent(task_dict)
-            a.expected_event = False
+        new_task = list(task_dict.items())[-1][1]
+        mothership.added_tasks.append(new_task)
+        mothership.load_task(new_task.id,
+                             new_task.location,
+                             new_task.work,
+                             new_task.reward)
+        # Distribute new tasks
+        for p in group_list:
+            content = (mothership.id, p.id, "New Task",
+                       mothership.added_tasks)
+            mothership.send_msg_down_chain(comms_mgr, content)
 
 
 if __name__ == "__main__":
     args = get_args()
 
     # Load testing params
-    # TODO maybe load this more elegantly
     with open(args.test_config, "r") as f:
         test_config = yaml.safe_load(f)
+        test_name = test_config["test_name"]
         trials = test_config["trials"]
+        tests = test_config["tests"]
+        show_viz = test_config["viz"]
         sim_configs = test_config["sim_configs"]
         comms_max_range = test_config["comms_max_range"]
         comms_decay_range = test_config["comms_decay_range"]
@@ -100,241 +141,225 @@ if __name__ == "__main__":
 
     # Initialize results logger here
     logger = init_logger("Simulations")  # TODO replace print status updates
-    file_logger = FileLogger()
+    file_logger = FileLogger(filename=test_name)
 
     for tr in range(trials):
         print("\n==== Trial", tr, " ====")
-
-        # Items to track
-        best_results = []
-        frontEnd_results = []
-        distrOnly_results = []
-        twoPart_results = []
-        hybrid_results = []
 
         # === INITIALIZE SIMULATION ENVIRONMENT ===
         # Create environment
         env = make_environment_from_config(
             args.problem_config, args.topo_file, args.tide_folder)
 
+        random_base = env.setup_random_base_loc()
+        print("Random base location:", random_base)
+
         # Create task list from config
-        task_dict = generate_tasks_from_config(args.problem_config, env)
+        task_dict = generate_tasks_from_config(
+            args.problem_config, env, random_base)
 
-        for sim_config in sim_configs:
-            print("\n ===", " Tr", tr, ": Running", sim_config, "...")
+        for ts in range(tests):
 
-            # Temp new tasks
-            temp_task_dict = deepcopy(task_dict)
+            # Items to track
+            tr_arr = []
+            ts_arr = []
+            best_results = []
+            frontEnd_results = []
+            distrOnly_results = []
+            twoPart_results = []
+            hybrid_results = []
 
-            # Create agents
-            group_list = generate_passengers_from_config(args.solver_config,
-                                                         args.problem_config)
+            for sim_config in sim_configs:
+                print("\n ===", " Tr", tr, ": Running", sim_config, "...")
 
-            supp_list = generate_supports_from_config(args.solver_config,
-                                                      args.problem_config)
+                # Temp new tasks
+                temp_task_dict = deepcopy(task_dict)
 
-            mothership = gen_mother_from_config(args.solver_config,
-                                                args.problem_config,
-                                                group_list)
+                # Create agents
+                group_list = generate_passengers_from_config(
+                    args.solver_config, args.problem_config, random_base)
 
-            # Create comms framework (TBD - may be ROS)
-            all_agents = group_list + supp_list + [mothership]
-            comms_mgr = CommsManager(env,
-                                     all_agents,
-                                     comms_max_range,
-                                     comms_decay_range,
-                                     comms_max_succ_prob,
-                                     comms_decay_rate,
-                                     group_list[0].sim_data["m_id"])
+                supp_list = generate_supports_from_config(args.solver_config,
+                                                          args.problem_config,
+                                                          random_base)
 
-            # Set up initial env state
-            mothership.agent_list = all_agents
-            mothership.group_list = group_list
-            mothership.update_reachable_neighbors(comms_mgr)
-            mothership.set_up_dim_ranges(env)
-            mothership.load_tasks_on_agent(temp_task_dict)
-            for p in group_list:
-                p.agent_list = all_agents
-                p.group_list = group_list
-                p.mothership = mothership
-                p.update_reachable_neighbors(comms_mgr)
-                p.set_up_dim_ranges(env)
-                p.sense_location_from_env(env)
-                p.load_tasks_on_agent(temp_task_dict)
-            for s in supp_list:
-                s.agent_list = all_agents
-                s.group_list = group_list
-                s.mothership = mothership
-                s.update_reachable_neighbors(comms_mgr)
-                s.set_up_dim_ranges(env)
-                s.sense_location_from_env(env)
+                mothership = gen_mother_from_config(args.solver_config,
+                                                    args.problem_config,
+                                                    group_list,
+                                                    random_base)
 
-            # == If Centralized, Generate Plan & Load on Passengers
-            if "Cent" in sim_config or "Hybrid" in sim_config:
-                # Plan on mothership
-                print("Solving team schedules...")
-                mothership.solve_team_schedules(comms_mgr)
+                # Create comms framework (TBD - may be ROS)
+                all_agents = group_list + supp_list + [mothership]
+                comms_mgr = CommsManager(env,
+                                         all_agents,
+                                         comms_max_range,
+                                         comms_decay_range,
+                                         comms_max_succ_prob,
+                                         comms_decay_rate,
+                                         group_list[0].sim_data["m_id"])
 
-            # Tracking failed robots for test cases
-            fails = 0
-
-            # Run Sim
-            print("Executing schedules...")
-            running = True
-            i = 0
-            b = 0
-            title = "Tr " + str(tr) + ": " + sim_config
-            viz = set_up_visualizer(env, temp_task_dict, title)
-            # viz.display_env(pssngr_list, static=False)
-            while running:
-                print("\n== TIME STEP:", i)
-                for p in all_agents:
-                    # Update observations
-                    p.sense_location_from_env(env)
-                    p.sense_flow_from_env(env)
-                    p.apply_observations_to_model()
-                    p.update_reachable_neighbors(comms_mgr)
-
-                    if p.type == p.MOTHERSHIP:
-                        print("M completion record:", [
-                              t for t in p.task_dict.keys() if p.task_dict[t].complete])
-
-                    if p.type == p.PASSENGER:
-                        print("= Passenger", p.id, " Tour:", [p.action[1]] + p.schedule, " Rem Energy:",
-                              p.sim_data["budget"])
-                        print(p.id, "completion record:", [
-                              t for t in p.task_dict.keys() if p.task_dict[t].complete])
-
-                        # Each time action is complete, do rescheduling (if distr)
-                        if "Dist" in sim_config or "Hybrid" in sim_config:
-                            # Forces periodic rescheduling
-                            if i > len(group_list) and i % (replan_freq + (2*p.id)) == 0:
-                                # p.expected_event = False
-                                p.action[0] = p.IDLE
-                                p.event = True
-                            # Solve for new action distro
-                            p.optimize_schedule_distr(comms_mgr, sim_config)
-                        # Update current action, reduce energy
-                        p.action_update(comms_mgr)
-                        # p.share_location(comms_mgr)
-
-                    if p.type == p.SUPPORT:
-                        p.action_update()
-
-                        # Potential passenger failure
-                    if p.type != p.MOTHERSHIP and "Best" not in sim_config:
-                        # Check for random failures
-                        p.random_failure(
-                            comms_mgr, robot_fail_prob)
-                        if p.type == p.PASSENGER and p.dead:
-                            # Continue attempting to send failure update
-                            p.have_failure(comms_mgr)
-                        # Execute designed failures
-                        # if i == fail_timeStep:
-                        #     if fails / len(group_list) < percent_fail:
-                        #         p.have_failure(comms_mgr)
-                        #         fails += 1
-
-                # Probability that new task is added to problem
-                chance_task_add(args.problem_config,
-                                env,
-                                temp_task_dict,
-                                all_agents,
-                                num_new_tasks,
-                                new_task_prob)
-
-                # Update environment
-                env.step(all_agents)
-
-                # Update message passing, also update comms graph
-                comms_mgr.step()
-
-                # Update visual
-                viz.display_env(group_list, supp_list, static=False)
-                time.sleep(0.01)
-
-                # Check stopping criteria
-                running = False
+                # Set up initial env state
+                mothership.agent_list = all_agents
+                mothership.group_list = group_list
+                mothership.update_reachable_neighbors(comms_mgr)
+                mothership.set_up_dim_ranges(env)
+                mothership.load_tasks_on_agent(temp_task_dict)
                 for p in group_list:
-                    if not (p.dead or p.finished):
-                        running = True
+                    p.agent_list = all_agents
+                    p.group_list = group_list
+                    p.mothership = mothership
+                    p.update_reachable_neighbors(comms_mgr)
+                    p.set_up_dim_ranges(env)
+                    p.sense_location_from_env(env)
+                    p.load_tasks_on_agent(temp_task_dict)
+                for s in supp_list:
+                    s.agent_list = all_agents
+                    s.group_list = group_list
+                    s.mothership = mothership
+                    s.update_reachable_neighbors(comms_mgr)
+                    s.set_up_dim_ranges(env)
+                    s.sense_location_from_env(env)
 
-                i += 1
+                # == If Centralized, Generate Plan & Load on Passengers
+                if "Cent" in sim_config or "Hybrid" in sim_config:
+                    # Plan on mothership
+                    print("Solving team schedules...")
+                    mothership.solve_team_schedules(comms_mgr)
 
-            print("Done")
-            viz.close_viz()
-            env.reset()
+                # Tracking failed robots for test cases
+                fails = 0
 
-            # Store results
-            reward = calculate_final_reward(temp_task_dict, group_list)
-            potent = calculate_final_potential_reward(
-                temp_task_dict, group_list)
-            percentDead = sum(p.dead for p in group_list) / len(group_list)
+                # Run Sim
+                print("Executing schedules...")
+                running = True
+                i = 0
+                b = 0
+                title = "Tr " + str(tr) + ": " + sim_config
+                if show_viz:
+                    viz = set_up_visualizer(env, temp_task_dict, title)
+                while running:
+                    print("\n== TIME STEP:", i)
+                    for p in all_agents:
+                        # Update observations
+                        p.sense_location_from_env(env)
+                        p.sense_flow_from_env(env)
+                        p.apply_observations_to_model()
+                        p.update_reachable_neighbors(comms_mgr)
 
-            print("Final Potential:", potent, " | Actual:", reward)
+                        if p.type == p.MOTHERSHIP:
+                            print("M completion record:", [
+                                t for t in p.task_dict.keys() if p.task_dict[t].complete])
 
-            if sim_config == "Cent | Best":
-                best_results.append(reward)
-            elif sim_config == "Cent | Stoch":
-                frontEnd_results.append(reward)
-                frontEnd_results.append(potent)
-                frontEnd_results.append(percentDead)
-            elif sim_config == "Dist | Stoch":
-                distrOnly_results.append(reward)
-                distrOnly_results.append(potent)
-                distrOnly_results.append(percentDead)
-            elif sim_config == "Hybrid1 | Stoch":
-                twoPart_results.append(reward)
-                twoPart_results.append(potent)
-                twoPart_results.append(percentDead)
-            elif sim_config == "Hybrid2 | Stoch":
-                hybrid_results.append(reward)
-                hybrid_results.append(potent)
-                hybrid_results.append(percentDead)
+                        if p.type == p.PASSENGER:
+                            print("= Passenger", p.id, " Tour:", [p.action[1]] + p.schedule, " Rem Energy:",
+                                  p.sim_data["budget"], " | Finished:", p.finished)
+                            print(p.id, "completion record:", [
+                                t for t in p.task_dict.keys() if p.task_dict[t].complete])
 
-        file_logger(tr,
-                    frontEnd_results,
-                    distrOnly_results,
-                    twoPart_results,
-                    hybrid_results
-                    )
+                            # Each time action is complete, do rescheduling (if distr)
+                            if "Dist" in sim_config or "Hybrid" in sim_config:
+                                # Forces periodic rescheduling
+                                if i > len(group_list) and i % (replan_freq + (2*p.id)) == 0:
+                                    p.action[0] = p.IDLE
+                                    p.event = True
+                                # Solve for new action distro
+                                p.optimize_schedule_distr(
+                                    comms_mgr, sim_config)
+                            # Update current action, reduce energy
+                            p.action_update(comms_mgr)
+                            # p.share_location(comms_mgr)
 
-    print("filename:", file_logger.log_filename)
+                        if p.type == p.SUPPORT:
+                            p.action_update()
+
+                    # EVENTS
+                    chance_robot_fail(group_list,
+                                      robot_fail_prob,
+                                      comms_mgr,
+                                      i)
+                    chance_task_add(args.problem_config,
+                                    env,
+                                    temp_task_dict,
+                                    mothership,
+                                    group_list,
+                                    num_new_tasks,
+                                    new_task_prob)
+
+                    # Update environment
+                    env.step(all_agents)
+
+                    # Update message passing, also update comms graph
+                    comms_mgr.step()
+
+                    # Update visual
+                    if show_viz:
+                        viz.display_env(group_list, supp_list, static=False)
+                        # time.sleep(0.01)
+
+                    # Check stopping criteria
+                    running = False
+                    for p in group_list:
+                        if not (p.dead or p.finished):
+                            running = True
+
+                    i += 1
+
+                print("Done")
+                if show_viz:
+                    viz.close_viz()
+                env.reset()
+
+                # Store results
+                reward = calculate_final_reward(temp_task_dict, group_list)
+                potent = calculate_final_potential_reward(
+                    temp_task_dict, group_list)
+                percentDead = sum(p.dead for p in group_list) / len(group_list)
+
+                print("Final Potential:", potent, " | Actual:", reward)
+
+                if sim_config == "Cent | Stoch":
+                    frontEnd_results.append(reward)
+                    frontEnd_results.append(potent)
+                    frontEnd_results.append(percentDead)
+                elif sim_config == "Dist | Stoch":
+                    distrOnly_results.append(reward)
+                    distrOnly_results.append(potent)
+                    distrOnly_results.append(percentDead)
+                elif sim_config == "Hybrid1 | Stoch":
+                    twoPart_results.append(reward)
+                    twoPart_results.append(potent)
+                    twoPart_results.append(percentDead)
+                elif sim_config == "Hybrid2 | Stoch":
+                    hybrid_results.append(reward)
+                    hybrid_results.append(potent)
+                    hybrid_results.append(percentDead)
+
+            tr_arr.append(tr)
+            ts_arr.append(ts)
+
+            if len(frontEnd_results) == 0:
+                frontEnd_results.append(0)
+                frontEnd_results.append(0)
+                frontEnd_results.append(0)
+            if len(distrOnly_results) == 0:
+                distrOnly_results.append(0)
+                distrOnly_results.append(0)
+                distrOnly_results.append(0)
+            if len(twoPart_results) == 0:
+                twoPart_results.append(0)
+                twoPart_results.append(0)
+                twoPart_results.append(0)
+            if len(hybrid_results) == 0:
+                hybrid_results.append(0)
+                hybrid_results.append(0)
+                hybrid_results.append(0)
+
+            file_logger(tr_arr,
+                        ts_arr,
+                        frontEnd_results,
+                        distrOnly_results,
+                        twoPart_results,
+                        hybrid_results
+                        )
+
     plot_results_from_log(file_logger.log_filename)
-
-    # Run simulation (planning, etc.)
-    # agent_list[0].send_message(comms_mgr, agent_list[1].id, "Hello!")
-    # i = 0
-    # viz = set_up_visualizer_from_config(env, args.config)
-    # while True:
-    #     print("TIME STEP:", i)
-
-    #     # Update agents (scheduling & control happens here)
-    #     for a in agent_list:  # TODO consider a.step() for all this
-    #         # Consider condensing this all into an a.step()
-    #         # get updated observations
-    #         a.sense_location_from_env(env)
-    #         a.sense_flow_from_env(env)
-
-    #         # If new flow found (EVENT), do rescheduling
-    #         # TODO update to only reschedule after action is completed
-    #         if a.event:
-    #             a.apply_observations_to_model()
-    #             # a.optimize_schedule() # TODO
-
-    #             # TODO Send necessary comms
-
-    #         # Update current action
-    #         a.action_update()
-
-    #     # Apply actions to get new environment state (update agent positions & observations, comms update)
-    #     env.step(agent_list)
-
-    #     # Update message passing, also update comms graph
-    #     comms_mgr.step()
-
-    #     # Update visual
-    #     viz.display_env(agent_list, static=False)
-
-    #     i += 1
-    #     time.sleep(0.1)

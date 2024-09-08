@@ -70,17 +70,20 @@ def add_tasks_to_dict(problem_config_fp, env, task_dict, num_tasks, high_rew=Fal
 
             id = len(task_dict) - 2
 
-            task_dict["v"+str(id)] = Task("v"+str(i),
+            task_dict["v"+str(id)] = Task("v"+str(id),
                                           np.array([x, y, z]), work, reward)
     return task_dict
 
 
-def generate_tasks_from_config(problem_config_fp, env):
+def generate_tasks_from_config(problem_config_fp, env, rand_base=None):
 
     with open(problem_config_fp, "r") as f:
         config = yaml.safe_load(f)
 
-        base_loc = np.array(config["base_loc"])
+        if rand_base:
+            base_loc = rand_base
+        else:
+            base_loc = np.array(config["base_loc"])
 
         task_dict = {}
         task_dict[config["start"]] = Task(config["start"], base_loc, 0, 1)

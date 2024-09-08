@@ -1,22 +1,27 @@
 # DEFINE TEST PARAMETERS
 
-trials: 5
+test_name: "randTides_fails1_tasks0_base_limTaskSync_MplanWithBest.csv"
 
-comms_max_range: 30000
-comms_decay_range: 10000 # Every decay_range meters, succ prob decays by decay rate (between passengers)
+trials: 20
+tests: 1
+
+viz: False
+
+comms_max_range: 20000
+comms_decay_range: 5000 # Every decay_range meters, succ prob decays by decay rate (between passengers)
 # comms_decay_range_m: 50000 # passenger-mothership decay range
 comms_max_succ_prob: 1.00  # % max successful messages
 comms_decay_rate: 0.05 # % decay per decay range
 
 edge_discovery_prob: 0.00 # % chance agent has at each time step for discovering random edge
 new_task_prob: 0.00 # % chance new task appears each time step
-num_new_tasks: 1
+num_new_tasks: 1 # num tasks that will be added at each new task event
 
-robot_fail_prob: 0.00 #0.0025 # % chance a robot fails each time step
+robot_fail_prob: 0.1 #0.025 # % chance a robot fails each time step
 percent_fail: 0.0 # % of robots that will fail at fail_timestep
 fail_timeStep: 0
 
-replan_freq: 50
+replan_freq: 25
 
 # == Define each type of test that will run on each test case (trial)
 sim_configs:

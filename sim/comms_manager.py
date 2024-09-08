@@ -129,8 +129,8 @@ class CommsManager:
                     # Remove & send received message
                     self.agent_dict[msg.receiver_id].receive_message(
                         self, arrive_msg)
-                else:
-                    print("Message failed")
+                # else:
+                #     print("Message failed")
 
 
 class CommsManager_Basic:
