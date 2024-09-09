@@ -21,6 +21,7 @@ class Mothership(Agent):
         self.sched_cooldown_dict = {}
         for rob in pssngr_list:
             self.sched_cooldown_dict[rob.id] = 0  # budget at last request
+        self.agent_info_dict = {}
 
     def solve_team_schedules(self, comms_mgr: CommsManager):
         # Get an initial solution
@@ -122,10 +123,10 @@ class Mothership(Agent):
             # print("Tasks to remove:", alloc_tasks)
 
             data["planning_graph"] = deepcopy(self.sim_data["planning_graph"])
-            for v in alloc_tasks:
-                if v in data["planning_graph"].vertices:
-                    if v != data["end"] and v != data["start"]:
-                        data["planning_graph"].vertices.remove(v)
+            # for v in alloc_tasks:
+            #     if v in data["planning_graph"].vertices:
+            #         if v != data["end"] and v != data["start"]:
+            #             data["planning_graph"].vertices.remove(v)
 
             print("M Planning with:", data["planning_graph"].vertices)
 
@@ -168,21 +169,21 @@ class Mothership(Agent):
         scores = rews * rels
         action_dist = ActionDistribution(sols, scores)
 
-        # Send action_dist to all robots
+        # Send action_dist back to requesting agent
         content = (self.id, agent_id, "Update", (agent_id, action_dist))
         self.send_msg_down_chain(comms_mgr, content)
 
         # NOTE though we don't have confirmation that an action_dist was delivered, we save results anyways here to influence scheduling for other agents
-        self.stored_act_dists[agent_id] = action_dist  # ActionDistribution(
+        # TODO TRY REMOVING THIS, as it is perhaps a source of confusion for mothership solver
+        # self.stored_act_dists[agent_id] = action_dist  # ActionDistribution(
         # [solution[0]], [1])
 
     def solve_new_schedules_subset(self,
                                    comms_mgr: CommsManager,
-                                   agent_id,
-                                   budget,
-                                   current_schedule,
-                                   starting_location,
-                                   act_samples=1):
+                                   agent_ids,
+                                   budgets,
+                                   starting_locations
+                                   ):
 
         print("Solving centralized schedule...")
 
@@ -289,15 +290,15 @@ class Mothership(Agent):
 
             # self.broadcast_message(comms_mgr, self.pssngr_list, content)
 
-            for target in self.group_list:
-                if target.id != origin:
-                    content = (self.id, target.id, "Update", data)
-                    self.send_msg_down_chain(comms_mgr, content)
+            # TODO Removed this as each agent now broadcasts act dist updates to neighboring robots
+            # for target in self.group_list:
+            #     if target.id != origin:
+            #         content = (self.id, target.id, "Update", data)
+            #         self.send_msg_down_chain(comms_mgr, content)
 
         # Return copy of current act dis if sending agent has initiated comms
         elif tag == "Initiate":
             # self.stored_act_dists[data[0]] = data[1]
-            # TODO THIS SHOULD FORWARD A MESSAGE RATHER THAN PROCESS IT
             # if self.my_action_dist != None:
             for target in self.group_list:
                 if target.id != origin:
@@ -305,7 +306,6 @@ class Mothership(Agent):
                     self.send_msg_down_chain(comms_mgr, content)
 
         elif tag == "Dead":
-            # TODO maybe give further consideration to difference between Dead and Update
             if data[0] == self.id:
                 return
             if len(self.stored_act_dists[data[0]].best_action().action_seq) > 0:
@@ -322,15 +322,17 @@ class Mothership(Agent):
         elif tag == "Complete Task":
             for task in data:
                 if task not in self.glob_completed_tasks:
+                    print("!!! M Received complete task:", task)
                     self.glob_completed_tasks.append(task)
                     self.task_dict[task].complete = True
             # if self.sim_data["basic"]:
             #     if msg.content[1] in self.sim_data["graph"].vertices:
             #         self.sim_data["graph"].vertices.remove(msg.content[1])
-            for target in self.group_list:
-                if target.id != origin:
-                    content = (self.id, target.id, "Complete Task", data)
-                    self.send_msg_down_chain(comms_mgr, content)
+            # TODO Removed data sharing here to emphasize how info is aggragated on M
+            # for target in self.group_list:
+            #     if target.id != origin:
+            #         content = (self.id, target.id, "Complete Task", data)
+            #         self.send_msg_down_chain(comms_mgr, content)
 
         elif tag == "Schedule Request":
             # print(self.id, " received Schedule Request")

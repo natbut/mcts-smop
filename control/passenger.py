@@ -89,8 +89,8 @@ class Passenger(Agent):
             self.send_msg_up_chain(comms_mgr, content)
 
             # TODO ADDED PRIORITY FOR M SCHEDULES
-            if not self.event:
-                return
+            # if not self.event:
+            #     return
 
         # Load search tree
         data = self.solver_params
@@ -148,18 +148,16 @@ class Passenger(Agent):
             self.my_action_dist = tree.my_act_dist
 
         # Send up to mothership, which then sends to other agents
-        # TODO (I think this happens? Check to be sure)
-        content = (self.id, self.sim_data["m_id"],
-                   "Update", (self.id, self.my_action_dist))
-        self.send_msg_up_chain(comms_mgr, content)
-
-        # Send new action dist to other agents
-        # for target in self.agent_list:
-        #     if target.id != self.id:
-        #         content = (self.id, target.id, "Update",
-        #                    (self.id, self.my_action_dist))
-        #         self.broadcast_msg_to_neighbors(comms_mgr,
-        #                                         content)
+        # TODO Changed this to a distributed message sending, rather than only sending messages up to M
+        for a in self.agent_list:
+            if a.id != self.id:
+                if self.neighbors_status[a.id] and a.type != self.SUPPORT:
+                    content = (self.id, a.id,
+                               "Update", (self.id, self.my_action_dist))
+                    self.send_msg_up_chain(comms_mgr, content)
+                content = (
+                    self.id, self.sim_data["m_id"], "Update", (self.id, self.my_action_dist))
+                self.send_msg_up_chain(comms_mgr, content)
 
         # Select schedule to be used by agent
         self.schedule = self.my_action_dist.best_action().action_seq[:]
@@ -270,9 +268,17 @@ class Passenger(Agent):
             self.stored_reward_sum += self.task_dict[self.action[1]].reward
             # content = (
             #     self.id, self.sim_data["m_id"], "Complete Task", self.glob_completed_tasks)
-            content = (
-                self.id, self.sim_data["m_id"], "Complete Task", [self.action[1]])
-            self.send_msg_up_chain(comms_mgr, content)
+
+            # TODO - Changed to distributed-type message passing here
+            for a in self.agent_list:
+                if a.id != self.id:
+                    if self.neighbors_status[a.id] and a.type != self.SUPPORT:
+                        content = (
+                            self.id, a.id, "Complete Task", [self.action[1]])
+                        self.send_msg_up_chain(comms_mgr, content)
+                    content = (
+                        self.id, self.sim_data["m_id"], "Complete Task", [self.action[1]])
+                    self.send_msg_up_chain(comms_mgr, content)
 
         # 3) Otherwise continue doing work
         elif self.action[0] == self.WORKING and self.work_remaining > 0:
@@ -317,11 +323,11 @@ class Passenger(Agent):
                 # Receiving own schedule
                 # Compare schedule to stored elites, update action distro
                 if self.last_msg_content == data[1]:
+                    # No need for repeated updates from same msgs
                     return
                 else:
                     self.last_msg_content = data[1]
                     self._update_my_best_action_dist(data[1], force_use=True)
-                # TODO ADDED PRIORITY FOR M SCHEDULES (enforce using if received)
                 # self.my_action_dist = data[1]
                 # self.schedule = self.my_action_dist.best_action().action_seq[:]
                 # self.event = False
@@ -365,7 +371,6 @@ class Passenger(Agent):
                     self.send_msg_up_chain(comms_mgr, content)
 
             elif tag == "Dead":
-                # TODO maybe give further consideration to difference between Dead and Update
                 if data[0] == self.id:
                     return
                 if len(self.stored_act_dists[data[0]].best_action().action_seq) > 0:

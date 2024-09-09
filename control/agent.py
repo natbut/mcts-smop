@@ -143,7 +143,7 @@ class Agent:
                 if test_task_id not in self.task_dict.keys():
                     new_route = False
             if new_route:
-                age = state.age
+                # age = state.age
                 rel_route = [self.sim_data["rob_task"]] + route
                 print("Evaluating", rel_route)
                 _, rel = fast_simulation(

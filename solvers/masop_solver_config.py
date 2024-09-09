@@ -42,20 +42,45 @@ def route_det_cost(route, graph: Graph):
     return sum(graph.get_mean_cost_edgeWork((route[i], route[i+1])) for i in range(len(route)-1))
 
 
-def routes_stoch_reward(solution, graph: Graph, budget):
+def routes_stoch_reward(solution, graph: Graph, budget, reduced_schedDists=None):
     """
     Evaluate cost of each route (list of vertices) in solution using graph. If cost is within budget, add rewards from route to rewards sum. Return sum.
     """
-    all_tasks_successfully_visited = []
+    tasks_visited_by_planning_robots = []
     fail = 0
+    all_tasks_visited = []
+
+    # Sample visited tasks from schedDists
+    tasks_visited_by_other_robots = []
+    rew_from_others = 0
+    if reduced_schedDists:
+        # Collect visited tasks with and without robot_i
+        for act_dist in reduced_schedDists.values():
+            scheduled = act_dist.random_action().action_seq[:]
+            tasks_visited_by_other_robots += scheduled
+        unique_other_tasks_visited = set(tasks_visited_by_other_robots)
+        all_tasks_visited += unique_other_tasks_visited
+        rew_from_others = sum(graph.rewards[task_id]
+                              for task_id in unique_other_tasks_visited)
+
+    # Collect tasks visited by proposed solution
     for route in solution:
         # Only apply tasks if route is a success
+        # TODO this doesn't help much with partial routes
         if route_stoch_cost(route, graph) < budget:
-            all_tasks_successfully_visited += route
+            tasks_visited_by_planning_robots += route
         else:
             fail = 1
-    unique_tasks_visited = set(all_tasks_successfully_visited)
-    return sum(graph.rewards[task_id] for task_id in unique_tasks_visited), fail
+    # unique_planning_tasks_visited = set(tasks_visited_by_planning_robots)
+    all_tasks_visited += tasks_visited_by_planning_robots
+    unique_all_tasks_visited = set(all_tasks_visited)
+    # rew_from_planning = sum(graph.rewards[task_id]
+    #                         for task_id in unique_planning_tasks_visited)
+
+    rew_from_all_tasks = sum(graph.rewards[task_id]
+                             for task_id in unique_all_tasks_visited)
+
+    return rew_from_all_tasks - rew_from_others, fail
 
 
 def route_stoch_cost(route, graph: Graph):
