@@ -225,6 +225,8 @@ if __name__ == "__main__":
                     # Plan on mothership
                     print("Solving team schedules...")
                     mothership.solve_team_schedules(comms_mgr)
+                    for g in group_list:
+                        g.initialize_schedule()
 
                 # Tracking failed robots for test cases
                 fails = 0

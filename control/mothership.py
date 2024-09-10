@@ -103,6 +103,11 @@ class Mothership(Agent):
         data["start"] = self.sim_data["rob_task"]
         data["num_robots"] = 1
 
+        reduced_sched_dists = deepcopy(self.stored_act_dists)
+        if reduced_sched_dists:
+            del reduced_sched_dists[agent_id]
+        data["reduced_sched_dists"] = reduced_sched_dists
+
         # Reduce vertices to only available tasks
         # This encompasses tasks that M has been told are complete PLUS those that M believes to be scheduled by other agents
 
@@ -111,13 +116,13 @@ class Mothership(Agent):
         rews = []
         rels = []
         for _ in range(self.solver_params["act_samples"]):
-            alloc_tasks = []
-            for rob_id, act_dist in self.stored_act_dists.items():
-                if rob_id != agent_id:
-                    alloc_tasks += act_dist.best_action().action_seq[:]
-                    # TODO: Do random_action here if doing many samples
+            # alloc_tasks = []
+            # for rob_id, act_dist in self.stored_act_dists.items():
+            #     if rob_id != agent_id:
+            #         alloc_tasks += act_dist.best_action().action_seq[:]
+            # TODO: Do random_action here if doing many samples
 
-            alloc_tasks = set(alloc_tasks)  # + self.completed_tasks)
+            # alloc_tasks = set(alloc_tasks)  # + self.completed_tasks)
 
             # print("Reduced set:", alloc_tasks)
             # print("Tasks to remove:", alloc_tasks)
@@ -145,6 +150,7 @@ class Mothership(Agent):
                                            data["t_max"],
                                            data["explore_iters"],
                                            data["intense_iters"],
+                                           data["reduced_sched_dists"]
                                            )
 
             if len(solution) == 0:
@@ -322,7 +328,7 @@ class Mothership(Agent):
         elif tag == "Complete Task":
             for task in data:
                 if task not in self.glob_completed_tasks:
-                    print("!!! M Received complete task:", task)
+                    # print("!!! M Received complete task:", task)
                     self.glob_completed_tasks.append(task)
                     self.task_dict[task].complete = True
             # if self.sim_data["basic"]:

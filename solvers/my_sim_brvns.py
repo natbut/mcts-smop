@@ -191,8 +191,7 @@ def BRVNS(initial_solution,
           k_max=100,
           t_max=1000,
           exploratory_mcs_iters=200,
-          intensive_mcs_iters=1000,
-          reduced_sched_dists=None
+          intensive_mcs_iters=1000
           ):
 
     # print("Initial Solution:", initial_solution)
@@ -202,8 +201,7 @@ def BRVNS(initial_solution,
     stoch_reward, reliability = fast_simulation(baseSol,
                                                 graph,
                                                 budget,
-                                                exploratory_mcs_iters,
-                                                reduced_sched_dists
+                                                exploratory_mcs_iters
                                                 )
     stoch_reward_base = stoch_reward
     stoch_reward_best = stoch_reward
@@ -236,8 +234,7 @@ def BRVNS(initial_solution,
                 stoch_reward, _ = fast_simulation(newSol,
                                                   graph,
                                                   budget,
-                                                  intensive_mcs_iters,
-                                                  reduced_sched_dists
+                                                  intensive_mcs_iters
                                                   )
                 if stoch_reward > stoch_reward_base:
                     # print("Better than base stoch; update base")
@@ -272,8 +269,7 @@ def BRVNS(initial_solution,
     best_reliability = 0
     for sol in elite_solutions:
         stoch_reward_sol, reliability_sol = intensive_simulation(sol,
-                                                                 graph, budget, intensive_mcs_iters,
-                                                                 reduced_sched_dists)
+                                                                 graph, budget, intensive_mcs_iters)
         if stoch_reward_sol > stoch_reward_best:
             bestSol = sol
             best_reliability = reliability_sol
@@ -432,8 +428,7 @@ def sim_brvns(graph: Graph,
               k_max=100,
               t_max=1000,
               exploratory_mcs_iters=200,
-              intensive_mcs_iters=1000,
-              reduced_sched_dists=None
+              intensive_mcs_iters=1000
               ):
 
     initial_solution = constructive_heuristic(graph,
@@ -456,8 +451,7 @@ def sim_brvns(graph: Graph,
                                                 k_max,
                                                 t_max,
                                                 exploratory_mcs_iters,
-                                                intensive_mcs_iters,
-                                                reduced_sched_dists
+                                                intensive_mcs_iters
                                                 )
     return final_solution, reward, reliability
 

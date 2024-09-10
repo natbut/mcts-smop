@@ -38,6 +38,8 @@ class Agent:
         self.stored_reward_sum = 1
         self.last_msg_content = None
 
+        self.new_states_to_eval = []
+
         self.event = True
         self.expected_event = True
 
@@ -100,23 +102,26 @@ class Agent:
 
     # TODO this function should be moved to passengers because it uses self.schedule
     def _update_my_best_action_dist(self,
-                                    new_act_dist: ActionDistribution,
-                                    force_use=False):
+                                    force_new=False):
 
         # print("Un-pruned new states:", [x.action_seq for x in new_act_dist.X])
         # print("Un-pruned old states:", [
         #       x.action_seq for x in self.my_action_dist.X])
 
-        self._prune_completed_tasks(new_act_dist.X)
+        self._prune_completed_tasks(self.new_states_to_eval)
         self._prune_completed_tasks(self.my_action_dist.X)
 
-        print("New states to eval:", [x.action_seq for x in new_act_dist.X])
+        print("New states to eval:", [
+              x.action_seq for x in self.new_states_to_eval])
         print("Old states to eval:", [
               x.action_seq for x in self.my_action_dist.X])
 
-        states = self._combine_stored_and_new_states(new_act_dist.X)
-
-        # states = list(self.my_action_dist.X) + list(new_act_dist.X)
+        if force_new:
+            print("Forcing new state usage")
+            states = self.new_states_to_eval
+        else:
+            states = self._combine_stored_and_new_states(
+                self.new_states_to_eval)
 
         # Evaluate reward for each reliable state schedule
         planning_task_dict = deepcopy(self.task_dict)
@@ -127,7 +132,6 @@ class Agent:
                                                          self.sim_data["end"],
                                                          filter=False)
         rewards = []
-        rels = []
         usable_states = []
 
         for state in states:
@@ -164,7 +168,11 @@ class Agent:
                 if rel > self.merger_params["rel_thresh"]:
                     # state.remaining_budget = self.sim_data["budget"]
                     rewards.append(alpha)
-                    rels.append(rel)
+                    # rels.append(rel)
+                    usable_states.append(state)
+                elif force_new:
+                    rewards.append(alpha)
+                    # rels.append(alpha)
                     usable_states.append(state)
 
         # print("Agent", self.id, "usable states:", len(usable_states))
@@ -181,15 +189,14 @@ class Agent:
                 usable_states.append(
                     State([self.schedule[0], self.sim_data["end"]], self.sim_data["budget"]))
             rewards.append(1.0)
-            rels.append(1.0)
 
         # Reduce to only top comms_n states (or fewer)
         # normalize rewards (0,1), sort by rew_norm + rel values
-        rewards = np.array(self.normalize(rewards))
-        rels = np.array(self.normalize(rels))
-        scores = rewards + (rels * self.merger_params["rel_mod"])
+        # rewards = np.array(self.normalize(rewards))
+        # rels = np.array(self.normalize(rels))
+        # scores = rewards + (rels * self.merger_params["rel_mod"])
         # print("Rews:", rewards, " Rels:", rels, " Scores:", scores)
-        pairs = list(zip(scores, usable_states))
+        pairs = list(zip(rewards, usable_states))
         sorted_pairs = sorted(pairs, key=lambda pair: pair[0], reverse=True)
         # print("Sorted pairs:", [(pair[0], pair[1].action_seq)
         #   for pair in sorted_pairs])
@@ -200,6 +207,8 @@ class Agent:
         # Update action distribution
         # NOTE we are now using rew+rel as score for determining q vals in hybrid approach
         self.my_action_dist = ActionDistribution(top_states, top_scores)
+
+        self.new_states_to_eval = []
 
         print("Agent", self.id, ": Updated distro:\n", self.my_action_dist)
 
@@ -254,12 +263,12 @@ class Agent:
         final_dest = content[1]
         # print("Final dest: ", final_dest)
         # Quick sends
-        if content[2] == "Update" or content[2] == "Dead":
-            # Share dist scheduling info with available neighbors
-            for target in self.agent_list:
-                if target.id != self.id and target.type == self.PASSENGER:
-                    if self.neighbors_status[target.id]:
-                        self.send_message(comms_mgr, target.id, content)
+        # if content[2] == "Update" or content[2] == "Dead":
+        #     # Share dist scheduling info with available neighbors
+        #     for target in self.agent_list:
+        #         if target.id != self.id and target.type == self.PASSENGER:
+        #             if self.neighbors_status[target.id]:
+        #                 self.send_message(comms_mgr, target.id, content)
 
         if self.neighbors_status[final_dest]:
             # Send message up to final dest (mothership)
@@ -315,12 +324,12 @@ class Agent:
         # print("Final dest: ", final_dest)
 
         # Quick sends
-        if content[2] == "Update" or content[2] == "Dead":
-            # Share dist scheduling info with available groups (passengers)
-            for target in self.agent_list:
-                if target.id != self.id and target.type == self.PASSENGER:
-                    if self.neighbors_status[target.id]:
-                        self.send_message(comms_mgr, target.id, content)
+        # if content[2] == "Update" or content[2] == "Dead":
+        #     # Share dist scheduling info with available groups (passengers)
+        #     for target in self.agent_list:
+        #         if target.id != self.id and target.type == self.PASSENGER:
+        #             if self.neighbors_status[target.id]:
+        #                 self.send_message(comms_mgr, target.id, content)
 
         if self.neighbors_status[final_dest]:
             # Send message to final dest (a passenger/group)
@@ -413,6 +422,9 @@ class Agent:
         data = msg.content[3]
 
         if self.id == final_dest:
+            if tag == "Complete Task":
+                print(self.id, "Received complete task",
+                      data, "from", msg.sender_id)
             self.process_msg_content(comms_mgr, origin, tag, data)
         else:
             self.forward_msg(comms_mgr, msg)

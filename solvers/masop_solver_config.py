@@ -57,18 +57,18 @@ def routes_stoch_reward(solution, graph: Graph, budget, reduced_schedDists=None)
         # Collect visited tasks with and without robot_i
         for act_dist in reduced_schedDists.values():
             scheduled = act_dist.random_action().action_seq[:]
-            tasks_visited_by_other_robots += scheduled
-        unique_other_tasks_visited = set(tasks_visited_by_other_robots)
-        all_tasks_visited += unique_other_tasks_visited
-        rew_from_others = sum(graph.rewards[task_id]
-                              for task_id in unique_other_tasks_visited)
+            tasks_visited_by_other_robots += [
+                t_id for t_id in scheduled if t_id in graph.vertices]
+    unique_other_tasks_visited = set(tasks_visited_by_other_robots)
+    all_tasks_visited += unique_other_tasks_visited
 
     # Collect tasks visited by proposed solution
     for route in solution:
         # Only apply tasks if route is a success
         # TODO this doesn't help much with partial routes
         if route_stoch_cost(route, graph) < budget:
-            tasks_visited_by_planning_robots += route
+            tasks_visited_by_planning_robots += [
+                t_id for t_id in route if t_id in graph.vertices]
         else:
             fail = 1
     # unique_planning_tasks_visited = set(tasks_visited_by_planning_robots)
@@ -77,8 +77,19 @@ def routes_stoch_reward(solution, graph: Graph, budget, reduced_schedDists=None)
     # rew_from_planning = sum(graph.rewards[task_id]
     #                         for task_id in unique_planning_tasks_visited)
 
+    # for task_id in unique_other_tasks_visited:
+    #     if task_id not in graph.vertices:
+    #         unique_other_tasks_visited.remove(task_id)
+
+    # for task_id in unique_all_tasks_visited:
+    #     if task_id not in graph.vertices:
+    #         unique_all_tasks_visited.remove(task_id)
+
     rew_from_all_tasks = sum(graph.rewards[task_id]
                              for task_id in unique_all_tasks_visited)
+
+    rew_from_others = sum(graph.rewards[task_id]
+                          for task_id in unique_other_tasks_visited)
 
     return rew_from_all_tasks - rew_from_others, fail
 
@@ -90,7 +101,7 @@ def route_stoch_cost(route, graph: Graph):
     return sum(graph.get_stoch_cost_edgeWork((route[i], route[i+1])) for i in range(len(route)-1))
 
 
-def fast_simulation(solution, graph: Graph, budget, iterations):
+def fast_simulation(solution, graph: Graph, budget, iterations, reduced_sched_dists=None):
     """
     Solution here is list of routes [[vs, v1, v2, vg], [vs, v3, v4, vg], ...]
     Get reward through MCS approach. Return average reward and reliability (percent success)
@@ -98,19 +109,20 @@ def fast_simulation(solution, graph: Graph, budget, iterations):
     rewards = []
     fails = 0
     for _ in range(iterations):
-        rew, fail = routes_stoch_reward(solution, graph, budget)
+        rew, fail = routes_stoch_reward(
+            solution, graph, budget, reduced_sched_dists)
         rewards.append(rew)
         fails += fail
     return sum(rew for rew in rewards) / iterations, (iterations - fails) / iterations
 
 
-def intensive_simulation(elite_solutions, graph, budget, iterations):
+def intensive_simulation(elite_solutions, graph, budget, iterations, reduced_sched_dists=None):
     """
     Solution here is list of routes [[vs, v1, v2, vg], [vs, v3, v4, vg], ...]
     Get reward through MCS approach. Return average reward and reliability (percent success)
     """
     # NOTE Same as fast simulation for now
-    return fast_simulation(elite_solutions, graph, budget, iterations)
+    return fast_simulation(elite_solutions, graph, budget, iterations, reduced_sched_dists)
 
 
 def calculate_final_potential_reward(task_dict, agent_list):

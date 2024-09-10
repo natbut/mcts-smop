@@ -26,25 +26,29 @@ class Passenger(Agent):
 
     # === SCHEDULING FUNCTIONS ===
 
-    def _update_my_best_action_dist(self,
-                                    new_act_dist: ActionDistribution,
-                                    force_use=False
-                                    ):
+    def initialize_schedule(self):
         # Automatically use schedule if currently have no schedule
         if self.action[1] == "Init":
             # TODO? this might struggle in purely distributed as it always uses 1st state only
-            self.my_action_dist = new_act_dist
+            self.my_action_dist = ActionDistribution(
+                self.new_states_to_eval, [1.0])
             self.schedule = self.my_action_dist.best_action().action_seq[:]
             self.event = False
             # initial reward
             # self.initial_alloc_reward = sum(
             #     self.sim_data["full_graph"].rewards[v] for v in self.schedule)
 
+            self.new_states_to_eval = []
             print("!! Schedule selected:", self.schedule, "\n")
             return
 
-        # Otherwise, distro
-        super()._update_my_best_action_dist(new_act_dist, force_use)
+    # def _update_my_best_action_dist(self,
+    #                                 new_act_dist: ActionDistribution,
+    #                                 force_use=False
+    #                                 ):
+    #     # Otherwise, distro
+    #     self.new_states_to_eval.append(new_act_dist.X)
+    #     super()._update_my_best_action_dist()
 
     def optimize_schedule_distr(self, comms_mgr: CommsManager, sim_config):
 
@@ -88,9 +92,9 @@ class Passenger(Agent):
 
             self.send_msg_up_chain(comms_mgr, content)
 
-            # TODO ADDED PRIORITY FOR M SCHEDULES
-            # if not self.event:
-            #     return
+            # If message has been received and processed from M
+            if not self.event:
+                return
 
         # Load search tree
         data = self.solver_params
@@ -142,7 +146,8 @@ class Passenger(Agent):
         # Evaluate candidate solutions against current stored elites, reduce to subset of size n_comms, select best act sequence from elites as new schedule
         # NOTE only need to do this type of solution merge if hybrid
         if "Hybrid" in sim_config:
-            self._update_my_best_action_dist(tree.my_act_dist)
+            self.new_states_to_eval += tree.my_act_dist.X
+            self._update_my_best_action_dist()
             # Send updated distro to M for use in scheduling other robots
         else:  # For distributed-only
             self.my_action_dist = tree.my_act_dist
@@ -151,13 +156,13 @@ class Passenger(Agent):
         # TODO Changed this to a distributed message sending, rather than only sending messages up to M
         for a in self.agent_list:
             if a.id != self.id:
-                if self.neighbors_status[a.id] and a.type != self.SUPPORT:
+                if a.type == self.PASSENGER and self.neighbors_status[a.id]:
                     content = (self.id, a.id,
                                "Update", (self.id, self.my_action_dist))
                     self.send_msg_up_chain(comms_mgr, content)
-                content = (
-                    self.id, self.sim_data["m_id"], "Update", (self.id, self.my_action_dist))
-                self.send_msg_up_chain(comms_mgr, content)
+        content = (
+            self.id, self.sim_data["m_id"], "Update", (self.id, self.my_action_dist))
+        self.send_msg_up_chain(comms_mgr, content)
 
         # Select schedule to be used by agent
         self.schedule = self.my_action_dist.best_action().action_seq[:]
@@ -269,16 +274,18 @@ class Passenger(Agent):
             # content = (
             #     self.id, self.sim_data["m_id"], "Complete Task", self.glob_completed_tasks)
 
-            # TODO - Changed to distributed-type message passing here
+            # distributed-type message passing here
             for a in self.agent_list:
                 if a.id != self.id:
-                    if self.neighbors_status[a.id] and a.type != self.SUPPORT:
+                    if a.type == self.PASSENGER and self.neighbors_status[a.id]:
+                        # print(self.id, "Sending completed task to", a.id)
                         content = (
                             self.id, a.id, "Complete Task", [self.action[1]])
                         self.send_msg_up_chain(comms_mgr, content)
-                    content = (
-                        self.id, self.sim_data["m_id"], "Complete Task", [self.action[1]])
-                    self.send_msg_up_chain(comms_mgr, content)
+            # print(self.id, "Sending completed task to M")
+            content = (
+                self.id, self.sim_data["m_id"], "Complete Task", [self.action[1]])
+            self.send_msg_up_chain(comms_mgr, content)
 
         # 3) Otherwise continue doing work
         elif self.action[0] == self.WORKING and self.work_remaining > 0:
@@ -322,24 +329,34 @@ class Passenger(Agent):
             elif tag == "Update" and data[0] == self.id:
                 # Receiving own schedule
                 # Compare schedule to stored elites, update action distro
+                print(self.id, "Received schedule from M:", data[1])
                 if self.last_msg_content == data[1]:
                     # No need for repeated updates from same msgs
                     return
                 else:
                     self.last_msg_content = data[1]
-                    self._update_my_best_action_dist(data[1], force_use=True)
-                # self.my_action_dist = data[1]
-                # self.schedule = self.my_action_dist.best_action().action_seq[:]
-                # self.event = False
-                # Send self update message back up toward mothership
-                # content = (self.id, self.sim_data["m_id"],
-                #            "Update", (self.id, self.my_action_dist))
-                # self.send_msg_up_chain(comms_mgr, content)
-                # Share updated distro # TODO - is this necessary? Handle instead in update_act_dist?
-                # content = (self.id, self.sim_data["m_id"], "Update",
-                #            (self.id, self.my_action_dist))
-                # self.broadcast_msg_to_neighbors(
-                #     comms_mgr, content)
+                    self.new_states_to_eval += data[1].X
+                    # BELOW ADDED TO FORCE UPDATES
+                    # Update act dist
+                    if self.action[1] == "Init":
+                        return
+                    self._update_my_best_action_dist(force_new=True)
+                    # Select schedule
+                    self.schedule = self.my_action_dist.best_action(
+                    ).action_seq[:]
+                    # Don't continue optimizing
+                    self.event = False
+                    # Broadcast new schedule dist
+                    for a in self.agent_list:
+                        if a.id != self.id:
+                            if a.type == self.PASSENGER and self.neighbors_status[a.id]:
+                                content = (self.id, a.id,
+                                           "Update", (self.id, self.my_action_dist))
+                                self.send_msg_up_chain(comms_mgr, content)
+                    content = (
+                        self.id, self.sim_data["m_id"], "Update", (self.id, self.my_action_dist))
+                    self.send_msg_up_chain(comms_mgr, content)
+
             elif tag == "Update" and data[0] != self.id:
                 # Receiving other robot's schedule
                 self.stored_act_dists[data[0]] = data[1]
@@ -354,7 +371,11 @@ class Passenger(Agent):
                 for task in data:
                     if task not in self.glob_completed_tasks:
                         self.glob_completed_tasks.append(task)
-                    self.task_dict[task].complete = True
+                    if task in self.task_dict.keys():
+                        self.task_dict[task].complete = True
+                    else:
+                        self.load_task(task, (0, 0, 0), 0, 0)
+                        self.task_dict[task].complete = True
         else:
             # Processing messages received from origin other groups
             if tag == "Update":
@@ -381,9 +402,11 @@ class Passenger(Agent):
 
             elif tag == "Complete Task":
                 for task in data:
-                    if task not in self.glob_completed_tasks:
-                        self.glob_completed_tasks.append(task)
-                    self.task_dict[task].complete = True
+                    if task in self.task_dict.keys():
+                        self.task_dict[task].complete = True
+                    else:
+                        self.load_task(task, (0, 0, 0), 0, 0)
+                        self.task_dict[task].complete = True
                 # print(self.id, "!!! Received task complete:", data)
                 # if self.sim_data["basic"]:
                 #     if msg.content[1] in self.sim_data["graph"].vertices:
