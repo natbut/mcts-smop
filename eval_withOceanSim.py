@@ -167,7 +167,8 @@ if __name__ == "__main__":
             frontEnd_results = []
             distrOnly_results = []
             twoPart_results = []
-            hybrid_results = []
+            dist_hybrid_results = []
+            full_hybrid_results = []
 
             for sim_config in sim_configs:
                 print("\n ===", " Tr", tr, ": Running", sim_config, "...")
@@ -221,7 +222,7 @@ if __name__ == "__main__":
                     s.sense_location_from_env(env)
 
                 # == If Centralized, Generate Plan & Load on Passengers
-                if "Cent" in sim_config or "Hybrid" in sim_config:
+                if "FEO" in sim_config or "2Stg" in sim_config:
                     # Plan on mothership
                     print("Solving team schedules...")
                     mothership.solve_team_schedules(comms_mgr)
@@ -259,7 +260,7 @@ if __name__ == "__main__":
                                 t for t in p.task_dict.keys() if p.task_dict[t].complete])
 
                             # Each time action is complete, do rescheduling (if distr)
-                            if "Dist" in sim_config or "Hybrid" in sim_config:
+                            if "DO" in sim_config or "DHyb" in sim_config:
                                 # Forces periodic rescheduling
                                 if i > len(group_list) and i % (replan_freq + (2*p.id)) == 0:
                                     p.action[0] = p.IDLE
@@ -319,22 +320,26 @@ if __name__ == "__main__":
 
                 print("Final Potential:", potent, " | Actual:", reward)
 
-                if sim_config == "Cent | Stoch":
+                if sim_config == "FEO":
                     frontEnd_results.append(reward)
                     frontEnd_results.append(potent)
                     frontEnd_results.append(percentDead)
-                elif sim_config == "Dist | Stoch":
+                elif sim_config == "DO":
                     distrOnly_results.append(reward)
                     distrOnly_results.append(potent)
                     distrOnly_results.append(percentDead)
-                elif sim_config == "Hybrid1 | Stoch":
+                elif sim_config == "2Stg":
                     twoPart_results.append(reward)
                     twoPart_results.append(potent)
                     twoPart_results.append(percentDead)
-                elif sim_config == "Hybrid2 | Stoch":
-                    hybrid_results.append(reward)
-                    hybrid_results.append(potent)
-                    hybrid_results.append(percentDead)
+                elif sim_config == "DHyb":
+                    dist_hybrid_results.append(reward)
+                    dist_hybrid_results.append(potent)
+                    dist_hybrid_results.append(percentDead)
+                elif sim_config == "DHyb2Stg":
+                    full_hybrid_results.append(reward)
+                    full_hybrid_results.append(potent)
+                    full_hybrid_results.append(percentDead)
 
             tr_arr.append(tr)
             ts_arr.append(ts)
@@ -351,17 +356,22 @@ if __name__ == "__main__":
                 twoPart_results.append(0)
                 twoPart_results.append(0)
                 twoPart_results.append(0)
-            if len(hybrid_results) == 0:
-                hybrid_results.append(0)
-                hybrid_results.append(0)
-                hybrid_results.append(0)
+            if len(twoPart_results) == 0:
+                dist_hybrid_results.append(0)
+                dist_hybrid_results.append(0)
+                dist_hybrid_results.append(0)
+            if len(full_hybrid_results) == 0:
+                full_hybrid_results.append(0)
+                full_hybrid_results.append(0)
+                full_hybrid_results.append(0)
 
             file_logger(tr_arr,
                         ts_arr,
                         frontEnd_results,
                         distrOnly_results,
                         twoPart_results,
-                        hybrid_results
+                        dist_hybrid_results,
+                        full_hybrid_results
                         )
 
     plot_results_from_log(file_logger.log_filename)

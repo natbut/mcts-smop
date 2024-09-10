@@ -100,6 +100,22 @@ class Agent:
                     # print("Removing", task, "from ", state.action_seq)
                     state.action_seq.remove(task)
 
+    def initialize_schedule(self):
+        # Automatically use schedule if currently have no schedule
+        if self.action[1] == "Init":
+            # TODO? this might struggle in purely distributed as it always uses 1st state only
+            self.my_action_dist = ActionDistribution(
+                self.new_states_to_eval, [1.0])
+            self.schedule = self.my_action_dist.best_action().action_seq[:]
+            self.event = False
+            # initial reward
+            # self.initial_alloc_reward = sum(
+            #     self.sim_data["full_graph"].rewards[v] for v in self.schedule)
+
+            self.new_states_to_eval = []
+            print("!! Schedule selected:", self.schedule, "\n")
+            return
+
     # TODO this function should be moved to passengers because it uses self.schedule
     def _update_my_best_action_dist(self,
                                     force_new=False):
@@ -107,6 +123,10 @@ class Agent:
         # print("Un-pruned new states:", [x.action_seq for x in new_act_dist.X])
         # print("Un-pruned old states:", [
         #       x.action_seq for x in self.my_action_dist.X])
+
+        if not self.my_action_dist:
+            self.initialize_schedule()
+            return
 
         self._prune_completed_tasks(self.new_states_to_eval)
         self._prune_completed_tasks(self.my_action_dist.X)

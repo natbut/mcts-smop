@@ -26,22 +26,6 @@ class Passenger(Agent):
 
     # === SCHEDULING FUNCTIONS ===
 
-    def initialize_schedule(self):
-        # Automatically use schedule if currently have no schedule
-        if self.action[1] == "Init":
-            # TODO? this might struggle in purely distributed as it always uses 1st state only
-            self.my_action_dist = ActionDistribution(
-                self.new_states_to_eval, [1.0])
-            self.schedule = self.my_action_dist.best_action().action_seq[:]
-            self.event = False
-            # initial reward
-            # self.initial_alloc_reward = sum(
-            #     self.sim_data["full_graph"].rewards[v] for v in self.schedule)
-
-            self.new_states_to_eval = []
-            print("!! Schedule selected:", self.schedule, "\n")
-            return
-
     # def _update_my_best_action_dist(self,
     #                                 new_act_dist: ActionDistribution,
     #                                 force_use=False
@@ -81,7 +65,7 @@ class Passenger(Agent):
         print("\n! Optimizing schedule")
 
         # Send schedule request
-        if "Hybrid2" in sim_config:
+        if "DHyb" in sim_config:
             content = (self.id,
                        self.sim_data["m_id"],
                        "Schedule Request",
@@ -94,6 +78,7 @@ class Passenger(Agent):
 
             # If message has been received and processed from M
             if not self.event:
+                print("No further schedules should be solved")
                 return
 
         # Load search tree
@@ -145,7 +130,7 @@ class Passenger(Agent):
                 sched.action_seq.pop(0)
         # Evaluate candidate solutions against current stored elites, reduce to subset of size n_comms, select best act sequence from elites as new schedule
         # NOTE only need to do this type of solution merge if hybrid
-        if "Hybrid" in sim_config:
+        if "Hyb" in sim_config or "2Stg" in sim_config:
             self.new_states_to_eval += tree.my_act_dist.X
             self._update_my_best_action_dist()
             # Send updated distro to M for use in scheduling other robots

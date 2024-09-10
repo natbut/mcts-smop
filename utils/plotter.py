@@ -5,6 +5,10 @@ import numpy as np
 import pandas as pd
 
 
+def plot_results_from_folder(folder_fp):
+    return
+
+
 def plot_results_from_log(log_fp):
     """
     Plots the results of simulation from given log file.
@@ -29,8 +33,10 @@ def plot_results_from_log(log_fp):
         col for col in df.columns if "distrOnly" in col]].values
     twoStep = df[[
         col for col in df.columns if "twoStep" in col]].values
-    hybrid = df[[
-        col for col in df.columns if "hybrid" in col]].values
+    distHybrid = df[[
+        col for col in df.columns if "dist_hybrid" in col]].values
+    fullHybrid = df[[
+        col for col in df.columns if "full_hybrid" in col]].values
 
     title = "Results for test " + name
 
@@ -39,7 +45,8 @@ def plot_results_from_log(log_fp):
                  frontEndOnly,
                  distrOnly,
                  twoStep,
-                 hybrid,
+                 distHybrid,
+                 fullHybrid,
                  title,
                  name
                  )
@@ -50,7 +57,8 @@ def plot_results(trial,
                  frontEnd_results,
                  distrOnly_results,
                  twoPart_results,
-                 hybrid_results,
+                 dist_hybrid_results,
+                 full_hybrid_results,
                  title="Results",
                  figname="Fig"
                  ):
@@ -59,18 +67,27 @@ def plot_results(trial,
     frontEnd_rew = round(np.mean([res[0] for res in frontEnd_results]), 2)
     distrOnly_rew = round(np.mean([res[0] for res in distrOnly_results]), 2)
     twoPart_rew = round(np.mean([res[0] for res in twoPart_results]), 2)
-    hybrid_rew = round(np.mean([res[0] for res in hybrid_results]), 2)
+    dist_hybrid_rew = round(
+        np.mean([res[0] for res in dist_hybrid_results]), 2)
+    full_hybrid_rew = round(
+        np.mean([res[0] for res in full_hybrid_results]), 2)
 
     # Mean potential rewards
     frontEnd_pot = round(np.mean([res[1] for res in frontEnd_results]), 2)
     distrOnly_pot = round(np.mean([res[1] for res in distrOnly_results]), 2)
     twoPart_pot = round(np.mean([res[1] for res in twoPart_results]), 2)
-    hybrid_pot = round(np.mean([res[1] for res in hybrid_results]), 2)
+    dist_hybrid_pot = round(np.mean([res[1]
+                            for res in dist_hybrid_results]), 2)
+    full_hybrid_pot = round(np.mean([res[1]
+                            for res in full_hybrid_results]), 2)
     # Mean robots lost
     frontEnd_fails = round(np.mean([res[2] for res in frontEnd_results]), 2)
     distrOnly_fails = round(np.mean([res[2] for res in distrOnly_results]), 2)
     twoPart_fails = round(np.mean([res[2] for res in twoPart_results]), 2)
-    hybrid_fails = round(np.mean([res[2] for res in hybrid_results]), 2)
+    dist_hybrid_fails = round(
+        np.mean([res[2] for res in dist_hybrid_results]), 2)
+    full_hybrid_fails = round(
+        np.mean([res[2] for res in full_hybrid_results]), 2)
 
     # StdErr
     frontEnd_rew_se = np.std([res[0] for res in frontEnd_results]) / \
@@ -79,8 +96,10 @@ def plot_results(trial,
         np.sqrt(len(distrOnly_results))
     twoPart_rew_se = np.std([res[0] for res in twoPart_results]) / \
         np.sqrt(len(twoPart_results))
-    hybrid_rew_se = np.std([res[0] for res in hybrid_results]) / \
-        np.sqrt(len(hybrid_results))
+    dist_hybrid_rew_se = np.std([res[0] for res in dist_hybrid_results]) / \
+        np.sqrt(len(full_hybrid_results))
+    full_hybrid_rew_se = np.std([res[0] for res in full_hybrid_results]) / \
+        np.sqrt(len(full_hybrid_results))
     # Potentials
     frontEnd_pot_se = np.std([res[1] for res in frontEnd_results]) / \
         np.sqrt(len(frontEnd_results))
@@ -88,18 +107,22 @@ def plot_results(trial,
         np.sqrt(len(distrOnly_results))
     twoPart_pot_se = np.std([res[1] for res in twoPart_results]) / \
         np.sqrt(len(twoPart_results))
-    hybrid_pot_se = np.std([res[1] for res in hybrid_results]) / \
-        np.sqrt(len(hybrid_results))
+    dist_hybrid_pot_se = np.std([res[1] for res in dist_hybrid_results]) / \
+        np.sqrt(len(dist_hybrid_results))
+    full_hybrid_pot_se = np.std([res[1] for res in full_hybrid_results]) / \
+        np.sqrt(len(full_hybrid_results))
 
-    avg_rew = [frontEnd_rew, distrOnly_rew, twoPart_rew, hybrid_rew]
+    avg_rew = [frontEnd_rew, distrOnly_rew,
+               twoPart_rew, dist_hybrid_rew, full_hybrid_rew]
 
-    avg_pot = [frontEnd_pot, distrOnly_pot, twoPart_pot, hybrid_pot]
+    avg_pot = [frontEnd_pot, distrOnly_pot,
+               twoPart_pot, dist_hybrid_rew, full_hybrid_pot]
 
     error_rew = [frontEnd_rew_se, distrOnly_rew_se,
-                 twoPart_rew_se, hybrid_rew_se]
+                 twoPart_rew_se, dist_hybrid_rew_se, full_hybrid_rew_se]
 
     error_pot = [frontEnd_pot_se, distrOnly_pot_se,
-                 twoPart_pot_se, hybrid_pot_se]
+                 twoPart_pot_se, dist_hybrid_pot_se, full_hybrid_pot_se]
 
     rew_content = {
         "Tasks Visited": (avg_pot, error_pot),
@@ -107,7 +130,7 @@ def plot_results(trial,
     }
 
     labels = ["Front-End Only", "Distr. Only", "Front End\n+ Dist Replan",
-              "Front End\n+ Hybrid Replan"]
+              "Hybrid Replan", "Front End\n+ Hybrid Replan"]
 
     # Plot results
     fig, ax = plt.subplots()
@@ -132,7 +155,7 @@ def plot_results(trial,
     ax.set_ylabel('Percent Task Completion')
     ax.set_title(title)
     ax.set_ybound(0.0, 1.0)
-    if hybrid_rew < 0.5:
+    if full_hybrid_rew < 0.5:
         ax.legend(loc='upper right', ncols=1)
     else:
         ax.legend(loc='lower right', ncols=1)

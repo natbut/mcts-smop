@@ -37,7 +37,8 @@ class FileLogger:
             "frontEndOnly_rew,frontEndOnly_potent,frontEndOnly_percDead,"
             "distrOnly_rew,distrOnly_potent,distrOnly_percDead,"
             "twoStep_rew,twoStep_potent,twoStep_percDead,"
-            "hybrid_rew,hybrid_potent,hybrid_percDead\n"
+            "dist_hybrid_rew,dist_hybrid_rew,dist_hybrid_rew,"
+            "full_hybrid_rew,full_hybrid_rew,full_hybrid_rew\n"
         )
 
         self.log_file.close()
@@ -49,7 +50,8 @@ class FileLogger:
         frontEnd_results: np.ndarray,
         distrOnly_results: np.ndarray,
         twoPart_results: np.ndarray,
-        hybrid_results: np.ndarray,
+        dist_hybrid_results: np.ndarray,
+        full_hybrid_results: np.ndarray,
     ):
         self.log_file = open(self.log_filename, 'a')  # type: ignore
 
@@ -58,7 +60,8 @@ class FileLogger:
             f"{frontEnd_results[0]},{frontEnd_results[1]},{frontEnd_results[2]},"
             f"{distrOnly_results[0]},{distrOnly_results[1]},{distrOnly_results[2]},"
             f"{twoPart_results[0]},{twoPart_results[1]},{twoPart_results[2]},"
-            f"{hybrid_results[0]},{hybrid_results[1]},{hybrid_results[2]}\n"
+            f"{dist_hybrid_results[0]},{dist_hybrid_results[1]},{dist_hybrid_results[2]},"
+            f"{full_hybrid_results[0]},{full_hybrid_results[1]},{full_hybrid_results[2]}\n"
         )
 
         self.log_file.close()

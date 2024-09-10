@@ -26,7 +26,8 @@ replan_freq: 25
 # == Define each type of test that will run on each test case (trial)
 sim_configs:
   # - "Cent | Best"
-  - "Cent | Stoch"
-  - "Dist | Stoch"
-  - "Hybrid1 | Stoch"
-  - "Hybrid2 | Stoch"
+  # - "FEO"
+  # - "DO"
+  # - "2Stg"
+  - "DHyb"
+  - "DHyb2Stg"

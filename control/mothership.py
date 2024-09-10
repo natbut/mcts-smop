@@ -104,7 +104,7 @@ class Mothership(Agent):
         data["num_robots"] = 1
 
         reduced_sched_dists = deepcopy(self.stored_act_dists)
-        if reduced_sched_dists:
+        if reduced_sched_dists and agent_id in reduced_sched_dists.keys():
             del reduced_sched_dists[agent_id]
         data["reduced_sched_dists"] = reduced_sched_dists
 
