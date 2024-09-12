@@ -220,9 +220,9 @@ def local_util_reward(data: dict, states: dict[State], rob_id):
         unique_tasks_visited_without = set(tasks_without_robot_i)
 
         reward_with.append(
-            sum(task_dict[task_id].reward for task_id in unique_tasks_visited))
+            sum(task_dict[task_id].reward for task_id in unique_tasks_visited if task_id in task_dict.keys()))
         reward_without.append(
-            sum(task_dict[task_id].reward for task_id in unique_tasks_visited_without))
+            sum(task_dict[task_id].reward for task_id in unique_tasks_visited_without if task_id in task_dict.keys()))
 
     return np.linalg.norm(np.array(reward_with) - np.array(reward_without))
 

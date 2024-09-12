@@ -90,15 +90,24 @@ class Agent:
                     states.append(old_state)
         return states
 
-    def _prune_completed_tasks(self, states: list[State]):
+    def _prune(self, states: list[State]):
         # Remove any completed tasks from proposed schedules
         for state in states:
+            updated_act_seq = state.action_seq[:]
             # print("Evaluating seq", state.action_seq)
-            for task in self.glob_completed_tasks:  # state.action_seq:
+            for task in state.action_seq:  # state.action_seq:
                 # print("Task", task, "Complete?", self.task_dict[task].complete)
-                if task in state.action_seq and task != self.sim_data["end"]:
+                if task in self.glob_completed_tasks and task != self.sim_data["end"]:
                     # print("Removing", task, "from ", state.action_seq)
-                    state.action_seq.remove(task)
+                    updated_act_seq.remove(task)
+                elif task not in self.task_dict.keys():
+                    # Remove new tasks that we have not yet received
+                    print("REMOVING", task, "BECAUSE NOT YET RECEIVED")
+                    updated_act_seq.remove(task)
+            state.action_seq = updated_act_seq[:]
+            # for task in state:
+            #     if task not in self.task_dict.keys():
+            #         state.action_seq.remove(task)
 
     def initialize_schedule(self):
         # Automatically use schedule if currently have no schedule
@@ -128,8 +137,8 @@ class Agent:
             self.initialize_schedule()
             return
 
-        self._prune_completed_tasks(self.new_states_to_eval)
-        self._prune_completed_tasks(self.my_action_dist.X)
+        self._prune(self.new_states_to_eval)
+        self._prune(self.my_action_dist.X)
 
         print("New states to eval:", [
               x.action_seq for x in self.new_states_to_eval])
