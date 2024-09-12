@@ -5,7 +5,15 @@ import numpy as np
 import pandas as pd
 
 
-def plot_results_from_folder(folder_fp):
+def plot_clustered_results(tests_to_plot,
+                            title="Results",
+                            figname="Fig"
+                            ):
+    
+
+
+    
+
     return
 
 

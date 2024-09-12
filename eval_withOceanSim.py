@@ -260,7 +260,7 @@ if __name__ == "__main__":
                                 t for t in p.task_dict.keys() if p.task_dict[t].complete])
 
                             # Each time action is complete, do rescheduling (if distr)
-                            if "DO" in sim_config or "DHyb" in sim_config:
+                            if "FEO" not in sim_config:
                                 # Forces periodic rescheduling
                                 if i > len(group_list) and i % (replan_freq + (2*p.id)) == 0:
                                     p.action[0] = p.IDLE
@@ -357,6 +357,10 @@ if __name__ == "__main__":
                 twoPart_results.append(0)
                 twoPart_results.append(0)
             if len(twoPart_results) == 0:
+                dist_hybrid_results.append(0)
+                dist_hybrid_results.append(0)
+                dist_hybrid_results.append(0)
+            if len(dist_hybrid_results) == 0:
                 dist_hybrid_results.append(0)
                 dist_hybrid_results.append(0)
                 dist_hybrid_results.append(0)

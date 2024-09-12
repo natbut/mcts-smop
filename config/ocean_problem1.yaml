@@ -1,6 +1,6 @@
 # PROBLEM PARAMETERS
 
-problem_size: 20
+problem_size: 30
 reward_range:
   - 1 # min
   - 10 # max
