@@ -1,2 +1,2 @@
-# masop
-Multi-Agent Stochastic Orienteering Problem
+# Hybrid Decentralized Planning for the Stochastic Multiagent Orienteering Problem (SMOP)
+
