@@ -260,10 +260,10 @@ def grouped_plot(fail_log_fps, task_log_fps, subplot_titles, plot_title=None, gr
     print(f"Plot saved to: {parent_path}/imgs/{save_name}.png")
     plt.show()
 
-def single_plot(log_fps, x_labels, save_name):
-    style = "seaborn-v0_8-pastel" # "fivethirtyeight"
+def single_plot(log_fps, x_labels, save_name, style = "seaborn-v0_8-pastel"):
+     # "fivethirtyeight"
     plt.style.use(style)
-    fig, ax = plt.subplots(1, 1, layout='constrained', figsize=(6, 4))
+    fig, ax = plt.subplots(1, 1, layout='constrained', figsize=(6, 2.65))
 
     data = {"Sim-BRVNS": [[], []],
             "Dec-MCTS": [[], []],
@@ -317,7 +317,7 @@ def single_plot(log_fps, x_labels, save_name):
         multiplier += 1
 
     ax.set_ylabel('% Total Reward')
-    ax.legend(loc='upper right', ncols=1)
+    # ax.legend(loc='upper right', ncols=1)
     if x_labels:
         ax.set_xticks(x + 1.5*width, x_labels)
     ax.set_ylim(0, 1.0)
@@ -374,9 +374,20 @@ if __name__ == "__main__":
                           "Task Rate 5.0%",
                           "Task Rate 10.0%",)
 
+    style = "seaborn-v0_8-colorblind"
+    
     # Plot rewards and save
     name = "3r_fails"
-    single_plot(log_fps_3rfails, x_fail_labels, name)
+    single_plot(log_fps_3rfails, x_fail_labels, name, style)
+    
+    name = "6r_fails"
+    single_plot(log_fps_6rfails, x_fail_labels, name, style)
+    
+    name = "3r_tasks"
+    single_plot(log_fps_3rtasks, x_task_labels, name, style)
+    
+    name = "6r_tasks"
+    single_plot(log_fps_6rtasks, x_task_labels, name, style)
 
     # log_fps_fails = [log_fps_3rfails, log_fps_6rfails]
     # log_fps_tasks = [log_fps_3rtasks, log_fps_6rtasks]
