@@ -260,6 +260,77 @@ def grouped_plot(fail_log_fps, task_log_fps, subplot_titles, plot_title=None, gr
     print(f"Plot saved to: {parent_path}/imgs/{save_name}.png")
     plt.show()
 
+def single_plot(log_fps, x_labels, save_name):
+    style = "seaborn-v0_8-pastel" # "fivethirtyeight"
+    plt.style.use(style)
+    fig, ax = plt.subplots(1, 1, layout='constrained', figsize=(6, 4))
+
+    data = {"Sim-BRVNS": [[], []],
+            "Dec-MCTS": [[], []],
+            "2-Stage": [[], []],
+            "2-Stage Hybrid": [[], []], }
+
+    for log_fp in log_fps:
+        print(f"Plotting results from log file: {log_fp}")
+        # parse log file name from log_fp
+        # basename = os.path.basename(log_fp)
+        # name = os.path.splitext(basename)[0]
+
+        df = pd.read_csv(log_fp)
+
+        # Extract values for each algorithm
+        frontEndOnly = df[["frontEndOnly_rew",
+                        "frontEndOnly_potent"]].values
+        distrOnly = df[["distrOnly_rew", "distrOnly_potent"]].values
+        twoStep = df[["twoStep_rew", "twoStep_potent"]].values
+        fullHybrid = df[["full_hybrid_rew", "full_hybrid_rew"]].values
+
+        # Mean rewards
+        data["Sim-BRVNS"][0].append(
+            round(np.mean(frontEndOnly[:, 0]), 2))
+        data["Dec-MCTS"][0].append(round(np.mean(distrOnly[:, 0]), 2))
+        data["2-Stage"][0].append(round(np.mean(twoStep[:, 0]), 2))
+        data["2-Stage Hybrid"][0].append(
+            round(np.mean(fullHybrid[:, 0]), 2))
+
+        # SE of Means
+        data["Sim-BRVNS"][1].append(
+            np.std(frontEndOnly[:, 0]) / np.sqrt(len(frontEndOnly[:, 0])))
+        data["Dec-MCTS"][1].append(
+            np.std(distrOnly[:, 0]) / np.sqrt(len(distrOnly[:, 0])))
+
+        data["2-Stage"][1].append(np.std(twoStep[:, 0]) /
+                                    np.sqrt(len(twoStep[:, 0])))
+        data["2-Stage Hybrid"][1].append(
+            np.std(fullHybrid[:, 0]) / np.sqrt(len(fullHybrid[:, 0])))
+
+    x = np.arange(len(log_fps))
+    width = 0.2
+    multiplier = 0
+
+    # colors=['blue', 'lightblue', 'red', 'green', 'darkviolet']
+    for attribute, measurements in data.items():
+        offset = width * multiplier
+        rects = ax.bar(
+            x + offset, measurements[0], width, yerr=measurements[1], label=attribute)#, color=colors)
+        ax.bar_label(rects, padding=0)
+        multiplier += 1
+
+    ax.set_ylabel('% Total Reward')
+    ax.legend(loc='upper right', ncols=1)
+    if x_labels:
+        ax.set_xticks(x + 1.5*width, x_labels)
+    ax.set_ylim(0, 1.0)
+
+    # == SAVE FIG ==
+    parent_path = os.getcwd()
+    # parent_path = os.path.dirname(current_path)
+    if not os.path.exists(f"{parent_path}/imgs"):
+        os.makedirs(f"{parent_path}/imgs")   
+        
+    fig.savefig(f"{parent_path}/imgs/{save_name}.png")
+    print(f"Plot saved to: {parent_path}/imgs/{save_name}.png")
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -268,49 +339,52 @@ if __name__ == "__main__":
     # print("Current path", current_path)
     # parent_path = os.path.dirname(current_path)
     
-    log_fps_fails = [
-        [
+    log_fps_3rfails = [
             f'{parent_path}/results/30n3r_fails0_tasks0_30tr.csv',
             f'{parent_path}/results/30n3r_fails025_tasks0_30tr.csv',
             f'{parent_path}/results/30n3r_fails05_tasks0_30tr.csv',
-        ],
-        [
+        ]
+    
+    log_fps_6rfails = [
             f'{parent_path}/results/30n6r_fails0_tasks0_30tr.csv',
             f'{parent_path}/results/30n6r_fails025_tasks0_30tr.csv',
             f'{parent_path}/results/30n6r_fails05_tasks0_30tr.csv',
         ]
-    ]
 
-    log_fps_tasks = [
-        [
+    log_fps_3rtasks = [
             f'{parent_path}/results/20n3r_fails0_tasks0_30tr.csv',
             f'{parent_path}/results/20n3r_fails0_tasks05_30tr.csv',
             f'{parent_path}/results/20n3r_fails0_tasks10_30tr.csv',
-        ],
-        [
+        ]
+    log_fps_6rtasks = [
             f'{parent_path}/results/20n6r_fails0_tasks0_30tr.csv',
             f'{parent_path}/results/20n6r_fails0_tasks05_30tr.csv',
             f'{parent_path}/results/20n6r_fails0_tasks10_30tr.csv',
         ]
-    ]
 
-    plot_title = "Experimental Results"
-    subplot_titles = [("Fails: 3 Workers", "Tasks: 3 Workers"),
-                      ("Fails: 6 Workers", "Tasks: 6 Workers")
+    subplot_titles = ["Fails: 3 Workers", "Fails: 6 Workers", 
+                      "Tasks: 3 Workers", "Tasks: 6 Workers"
                       ]
 
-    group_labels = [("Fail Rate 0.0%",
+    x_fail_labels = ("Fail Rate 0.0%",
                           "Fail Rate 2.5%",
-                          "Fail Rate 5.0%",),
-                    ("Task Rate 0.0%",
+                          "Fail Rate 5.0%",)
+    
+    x_task_labels =  ("Task Rate 0.0%",
                           "Task Rate 5.0%",
                           "Task Rate 10.0%",)
-                    ]
 
     # Plot rewards and save
-    grouped_plot(log_fps_fails,
-                 log_fps_tasks,
-                 subplot_titles,
-                 plot_title,
-                 group_labels,
-                 save_name="plot_config_test")
+    name = "3r_fails"
+    single_plot(log_fps_3rfails, x_fail_labels, name)
+
+    # log_fps_fails = [log_fps_3rfails, log_fps_6rfails]
+    # log_fps_tasks = [log_fps_3rtasks, log_fps_6rtasks]
+    # plot_title = "Experimental Results"
+    # group_labels = [x_fail_labels, x_task_labels]
+    # grouped_plot(log_fps_fails,
+    #              log_fps_tasks,
+    #              subplot_titles,
+    #              plot_title,
+    #              group_labels,
+    #              save_name="plot_config_test")
