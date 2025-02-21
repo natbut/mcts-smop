@@ -1,8 +1,8 @@
 # DEFINE TEST PARAMETERS
 
-test_name: "30n6r_fails0_tasks025_10tr_corr.csv"
+test_name: "30n3r_fails025_tasks0_30tr.csv"
 
-trials: 10
+trials: 30
 tests: 1
 
 viz: False
@@ -14,11 +14,11 @@ comms_max_succ_prob: 1.00  # % max successful messages
 comms_decay_rate: 0.05 # % decay per decay range
 
 edge_discovery_prob: 0.00 # % chance agent has at each time step for discovering random edge
-new_task_prob: 0.025 #0.025 # % chance new task appears each time step
+new_task_prob: 0.0 #0.025 # % chance new task appears each time step
 num_new_tasks: 1 # num tasks that will be added at each new task event
 
-robot_fail_prob: 0.0 #0.025 # % chance a robot fails each time step
-percent_fail: 0.0 # % of robots that will fail at fail_timestep
+robot_fail_prob: 0.025 #0.025 # % chance a robot fails each time step
+percent_fail: None # % of robots that will fail at fail_timestep
 fail_timeStep: 0
 
 replan_freq: 25

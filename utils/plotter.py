@@ -5,18 +5,6 @@ import numpy as np
 import pandas as pd
 
 
-def plot_clustered_results(tests_to_plot,
-                            title="Results",
-                            figname="Fig"
-                            ):
-    
-
-
-    
-
-    return
-
-
 def plot_results_from_log(log_fp):
     """
     Plots the results of simulation from given log file.
@@ -173,3 +161,156 @@ def plot_results(trial,
     print("Done")
 
     plt.show()
+
+
+def grouped_plot(fail_log_fps, task_log_fps, subplot_titles, plot_title=None, group_labels=None, save_name="results"):
+    """
+    Plots the results of simulation from the given log files in grouped plot.
+
+    Args:
+        log_fps (list): list of filepaths to logs (csv)
+        plot_type (str): either "reward" or "potential" to determine which data to plot.
+        save_name (str): the name to use when saving the plot.
+    """
+
+    # Set up subplots here
+    fig, axes = plt.subplots(2, 2, layout='constrained', figsize=(12, 6))
+    if plot_title:
+        fig.suptitle(plot_title)
+
+    fps = [fail_log_fps, task_log_fps]
+    # == PLOT RESULTS ==
+    for i, fp in enumerate(fps):
+        for log_fps, ax, sub_title, group_label in zip(fp, axes[:,i], subplot_titles, group_labels):
+
+            data = {"Sim-BRVNS": [[], []],
+                        "Dec-MCTS": [[], []],
+                        "2-Stage": [[], []],
+                        "2-Stage Hybrid": [[], []], }
+
+            for j, log_fp in enumerate(log_fps):
+                print(f"Plotting results from log file: {log_fp}")
+                # parse log file name from log_fp
+                basename = os.path.basename(log_fp)
+                name = os.path.splitext(basename)[0]
+
+                df = pd.read_csv(log_fp)
+
+                # Extract values for each algorithm
+                frontEndOnly = df[["frontEndOnly_rew",
+                                "frontEndOnly_potent"]].values
+                distrOnly = df[["distrOnly_rew", "distrOnly_potent"]].values
+                twoStep = df[["twoStep_rew", "twoStep_potent"]].values
+                distHybrid = df[["dist_hybrid_rew", "dist_hybrid_rew"]].values
+                fullHybrid = df[["full_hybrid_rew", "full_hybrid_rew"]].values
+
+                # Mean rewards
+                data["Sim-BRVNS"][0].append(
+                    round(np.mean(frontEndOnly[:, 0]), 2))
+                data["Dec-MCTS"][0].append(round(np.mean(distrOnly[:, 0]), 2))
+                data["2-Stage"][0].append(round(np.mean(twoStep[:, 0]), 2))
+                data["2-Stage Hybrid"][0].append(
+                    round(np.mean(fullHybrid[:, 0]), 2))
+
+                # SE of Means
+                data["Sim-BRVNS"][1].append(
+                    np.std(frontEndOnly[:, 0]) / np.sqrt(len(frontEndOnly[:, 0])))
+                data["Dec-MCTS"][1].append(
+                    np.std(distrOnly[:, 0]) / np.sqrt(len(distrOnly[:, 0])))
+
+                data["2-Stage"][1].append(np.std(twoStep[:, 0]) /
+                                            np.sqrt(len(twoStep[:, 0])))
+                data["2-Stage Hybrid"][1].append(
+                    np.std(fullHybrid[:, 0]) / np.sqrt(len(fullHybrid[:, 0])))
+
+            x = np.arange(len(log_fps))
+            width = 0.2
+            multiplier = 0
+
+            for attribute, measurements in data.items():
+                offset = width * multiplier
+                rects = ax.bar(
+                    x + offset, measurements[0], width, yerr=measurements[1], label=attribute)
+                ax.bar_label(rects, padding=0)
+                multiplier += 1
+
+            ax.set_ylabel('% Total Reward')
+            # ax.set_xlabel('Test Instance')
+            ax.set_title(sub_title[i])
+            # ax.legend(loc='upper right', ncols=1)
+            if group_labels:
+                ax.set_xticks(x + 1.5*width, group_labels[i])
+            ax.set_ylim(0, 1.0)
+
+
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center',
+            ncol=4)#, bbox_to_anchor=(0.5, 0.955))  # (0.5, 0.955)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.975])
+    
+    
+    # == SAVE FIG ==
+    parent_path = os.getcwd()
+    # parent_path = os.path.dirname(current_path)
+    if not os.path.exists(f"{parent_path}/imgs"):
+        os.makedirs(f"{parent_path}/imgs")   
+        
+    fig.savefig(f"{parent_path}/imgs/{save_name}.png")
+    print(f"Plot saved to: {parent_path}/imgs/{save_name}.png")
+    plt.show()
+
+
+
+if __name__ == "__main__":
+    # Predefined file paths
+    parent_path = os.getcwd()
+    # print("Current path", current_path)
+    # parent_path = os.path.dirname(current_path)
+    
+    log_fps_fails = [
+        [
+            f'{parent_path}/results/30n3r_fails0_tasks0_30tr.csv',
+            f'{parent_path}/results/30n3r_fails025_tasks0_30tr.csv',
+            f'{parent_path}/results/30n3r_fails05_tasks0_30tr.csv',
+        ],
+        [
+            f'{parent_path}/results/30n6r_fails0_tasks0_30tr.csv',
+            f'{parent_path}/results/30n6r_fails025_tasks0_30tr.csv',
+            f'{parent_path}/results/30n6r_fails05_tasks0_30tr.csv',
+        ]
+    ]
+
+    log_fps_tasks = [
+        [
+            f'{parent_path}/results/20n3r_fails0_tasks0_30tr.csv',
+            f'{parent_path}/results/20n3r_fails0_tasks05_30tr.csv',
+            f'{parent_path}/results/20n3r_fails0_tasks10_30tr.csv',
+        ],
+        [
+            f'{parent_path}/results/20n6r_fails0_tasks0_30tr.csv',
+            f'{parent_path}/results/20n6r_fails0_tasks05_30tr.csv',
+            f'{parent_path}/results/20n6r_fails0_tasks10_30tr.csv',
+        ]
+    ]
+
+    plot_title = "Experimental Results"
+    subplot_titles = [("Fails: 3 Workers", "Tasks: 3 Workers"),
+                      ("Fails: 6 Workers", "Tasks: 6 Workers")
+                      ]
+
+    group_labels = [("Fail Rate 0.0%",
+                          "Fail Rate 2.5%",
+                          "Fail Rate 5.0%",),
+                    ("Task Rate 0.0%",
+                          "Task Rate 5.0%",
+                          "Task Rate 10.0%",)
+                    ]
+
+    # Plot rewards and save
+    grouped_plot(log_fps_fails,
+                 log_fps_tasks,
+                 subplot_titles,
+                 plot_title,
+                 group_labels,
+                 save_name="plot_config_test")

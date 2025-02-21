@@ -208,6 +208,7 @@ def local_util_reward(data: dict, states: dict[State], rob_id):
     reward_with = []
     reward_without = []
     for _ in range(data["sim_iters"]):
+        # TODO should be running a fast sim here (I think multiple iters here are unnecessary because computed value is same each time)
 
         all_tasks_visited = []
         tasks_without_robot_i = []
