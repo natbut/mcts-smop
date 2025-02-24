@@ -37,8 +37,8 @@ class FileLogger:
             "frontEndOnly_rew,frontEndOnly_potent,frontEndOnly_percDead,"
             "distrOnly_rew,distrOnly_potent,distrOnly_percDead,"
             "twoStep_rew,twoStep_potent,twoStep_percDead,"
-            "dist_hybrid_rew,dist_hybrid_rew,dist_hybrid_rew,"
-            "full_hybrid_rew,full_hybrid_rew,full_hybrid_rew\n"
+            "dist_hybrid_rew,dist_hybrid_potent,dist_hybrid_percDead,"
+            "full_hybrid_rew,full_hybrid_potent,full_hybrid_percDead\n"
         )
 
         self.log_file.close()

@@ -272,37 +272,42 @@ def single_plot(log_fps, x_labels, save_name, style = "seaborn-v0_8-pastel"):
 
     for log_fp in log_fps:
         print(f"Plotting results from log file: {log_fp}")
-        # parse log file name from log_fp
-        # basename = os.path.basename(log_fp)
-        # name = os.path.splitext(basename)[0]
 
         df = pd.read_csv(log_fp)
 
         # Extract values for each algorithm
         frontEndOnly = df[["frontEndOnly_rew",
-                        "frontEndOnly_potent"]].values
-        distrOnly = df[["distrOnly_rew", "distrOnly_potent"]].values
-        twoStep = df[["twoStep_rew", "twoStep_potent"]].values
-        fullHybrid = df[["full_hybrid_rew", "full_hybrid_rew"]].values
+                        "frontEndOnly_potent",
+                        "frontEndOnly_percDead",]].values
+        distrOnly = df[["distrOnly_rew",
+                        "distrOnly_potent",
+                        "distrOnly_percDead",]].values
+        twoStep = df[["twoStep_rew",
+                      "twoStep_potent",
+                      "twoStep_percDead",]].values
+        fullHybrid = df[["full_hybrid_rew",
+                         "full_hybrid_potent",
+                         "full_hybrid_percDead",]].values
 
-        # Mean rewards
+        # Mean Values
+        idx = 2
         data["Sim-BRVNS"][0].append(
-            round(np.mean(frontEndOnly[:, 0]), 2))
-        data["Dec-MCTS"][0].append(round(np.mean(distrOnly[:, 0]), 2))
-        data["2-Stage"][0].append(round(np.mean(twoStep[:, 0]), 2))
+            round(np.mean(frontEndOnly[:, idx]), 2))
+        data["Dec-MCTS"][0].append(round(np.mean(distrOnly[:, idx]), 2))
+        data["2-Stage"][0].append(round(np.mean(twoStep[:, idx]), 2))
         data["2-Stage Hybrid"][0].append(
-            round(np.mean(fullHybrid[:, 0]), 2))
+            round(np.mean(fullHybrid[:, idx]), 2))
 
         # SE of Means
         data["Sim-BRVNS"][1].append(
-            np.std(frontEndOnly[:, 0]) / np.sqrt(len(frontEndOnly[:, 0])))
+            np.std(frontEndOnly[:, idx]) / np.sqrt(len(frontEndOnly[:, idx])))
         data["Dec-MCTS"][1].append(
-            np.std(distrOnly[:, 0]) / np.sqrt(len(distrOnly[:, 0])))
+            np.std(distrOnly[:, idx]) / np.sqrt(len(distrOnly[:, idx])))
 
-        data["2-Stage"][1].append(np.std(twoStep[:, 0]) /
-                                    np.sqrt(len(twoStep[:, 0])))
+        data["2-Stage"][1].append(np.std(twoStep[:, idx]) /
+                                    np.sqrt(len(twoStep[:, idx])))
         data["2-Stage Hybrid"][1].append(
-            np.std(fullHybrid[:, 0]) / np.sqrt(len(fullHybrid[:, 0])))
+            np.std(fullHybrid[:, idx]) / np.sqrt(len(fullHybrid[:, idx])))
 
     x = np.arange(len(log_fps))
     width = 0.2
@@ -315,8 +320,11 @@ def single_plot(log_fps, x_labels, save_name, style = "seaborn-v0_8-pastel"):
             x + offset, measurements[0], width, yerr=measurements[1], label=attribute)#, color=colors)
         ax.bar_label(rects, padding=0)
         multiplier += 1
-
-    ax.set_ylabel('% Total Reward')
+        
+    if idx != 2:
+        ax.set_ylabel('% Total Reward')
+    else:
+        ax.set_ylabel('% Robot Failures')
     # ax.legend(loc='upper right', ncols=1)
     if x_labels:
         ax.set_xticks(x + 1.5*width, x_labels)
