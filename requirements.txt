@@ -1,4 +1,7 @@
 pandas
 matplotlib
 numpy
-yaml
+xarray
+scipy
+networkx
+PyYAML
