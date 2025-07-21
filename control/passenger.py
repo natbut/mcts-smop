@@ -26,41 +26,11 @@ class Passenger(Agent):
 
     # === SCHEDULING FUNCTIONS ===
 
-    # def _update_my_best_action_dist(self,
-    #                                 new_act_dist: ActionDistribution,
-    #                                 force_use=False
-    #                                 ):
-    #     # Otherwise, distro
-    #     self.new_states_to_eval.append(new_act_dist.X)
-    #     super()._update_my_best_action_dist()
-
     def optimize_schedule_distr(self, comms_mgr: CommsManager, sim_config):
 
         # No optimization needed if no events or are dead/finished
         if (not self.event) or self.dead or self.finished:
             return
-
-        # Evaluate remaining schedule. If failure risk is low then do not optimize
-        # NOTE I expect that this will improve performance in low-disturbance situations. However, when robots fail or new tasks are added we would like to mandate that an update happens and skip this check.
-        # TODO we've removed this chunk for testing
-        # if "Dist" not in sim_config:
-        #     route = self.schedule
-        #     planning_task_dict = deepcopy(self.task_dict)
-        #     planning_task_dict[self.sim_data["rob_task"]] = Task(
-        #         self.sim_data["rob_task"], self.location, 0, 1)
-
-        #     self.sim_data["sim_graph"] = self.generate_graph(
-        #         planning_task_dict, self.sim_data["rob_task"], self.sim_data["end"], filter=False)
-
-        #     route = [self.sim_data["rob_task"]] + route
-        #     print("Evaluating", route)
-        #     _, rel = fast_simulation(
-        #         [route], self.sim_data["sim_graph"], self.sim_data["budget"], self.merger_params["mcs_iters"])
-
-        #     if rel > self.merger_params["rel_thresh"]:
-        #         self.event = False
-        #         print("Optimization not required")
-        #         return
 
         print("\n! Optimizing schedule")
 
@@ -199,25 +169,6 @@ class Passenger(Agent):
             # leaving = self.schedule.pop(0)
             # self.task_dict[leaving].complete = True
             self.action[1] = self.schedule.pop(0)
-
-            # NOTE remove first action (step) from each possible seq
-            # Handled by optimize_distr
-            # for state in self.my_action_dist.X:
-            #     state.action_seq.pop(0)
-
-            # if self.sim_data["basic"]:
-            #     edge = (leaving, self.action[1])
-            #     # print(self.id, "Traveling to new task on edge", edge)
-            #     self.travel_remaining = true_graph.get_edge_mean(edge)
-
-            #     if leaving in self.sim_data["graph"].vertices:
-            #         self.sim_data["graph"].vertices.remove(leaving)
-            #         if leaving not in self.completed_tasks:
-            #             self.completed_tasks.append(leaving)
-            #     self.sim_data["graph"].edges.remove(edge)
-
-            # self.task_dict[leaving].complete = True  # Mark task complete
-            # self.sim_data["start"] = self.action[1]
 
         if self.action[0] == self.IDLE:
             # print(self.id, "Resuming travel to", self.action[1])
@@ -392,106 +343,7 @@ class Passenger(Agent):
                     else:
                         self.load_task(task, (0, 0, 0), 0, 0)
                         self.task_dict[task].complete = True
-                # print(self.id, "!!! Received task complete:", data)
-                # if self.sim_data["basic"]:
-                #     if msg.content[1] in self.sim_data["graph"].vertices:
-                #         self.sim_data["graph"].vertices.remove(msg.content[1])
 
-    # === FUNCTIONS FOR EXPLORING SIMULATION ===
-
-    # def have_failure(self, comms_mgr, agent_list, sim_config, ):
-    #     self.action[0] = self.IDLE
-    #     self.dead = True
-    #     self.sim_data["budget"] = -1
-    #     print("!! ROBOT", self.id, " FAILURE")
-
-    #     # NOTE communicates that failure has occurred
-    #     # Send out an empty action distro to all agents and mothership
-    #     self.my_action_dist = ActionDistribution([State([], -1)], [1])
-    #     content = "Dead"
-    #     self.broadcast_message(comms_mgr, agent_list, sim_config, content)
-
-    # def failure_update(self, comms_mgr, agent_list, sim_config):
-    #     if self.dead:
-    #         content = "Dead"
-
-    #         self.broadcast_message(comms_mgr, agent_list, sim_config, content)
-
-    # def random_failure(self, comms_mgr, agent_list, sim_config, robot_fail_prob=0.0):
-    #     """
-    #     Active robots may incur random failures, with varying effects on performance
-    #     """
-    #     if self.action[0] != self.IDLE:
-    #         sample = np.random.random()
-    #         if sample > robot_fail_prob:
-    #             # No failure
-    #             return
-    #         self.have_failure(comms_mgr, agent_list, sim_config)
-
-    # def edge_discover(self, true_graph, comms_mgr, agent_list, sim_config, discovery_prob):
-    #     """
-    #     Active agents may discover random edges with probability discovery_prob
-    #     """
-    #     if self.action[0] != self.IDLE:
-    #         sample = np.random.random()
-    #         # Prob of returning early
-    #         if sample <= discovery_prob:
-    #             return
-    #         # Sample random edge from true graph
-    #         edge = random.choice(true_graph.edges)
-    #         self.sim_data["graph"].cost_distributions[edge] = true_graph.cost_distributions[edge]
-
-    #         content = ("Edge", edge, true_graph.cost_distributions[edge])
-
-    #         for target in agent_list:
-    #             if target.id != self.id:
-    #                 self.send_message(comms_mgr, target.id, content)
-
-    #         if "Hybrid" in sim_config:
-    #             self.send_message(comms_mgr, -1, content)
-
-    # def update_position_mod_vector(self):
-    #     if self.sim_data["basic"]:
-    #         print("No pos vector because basic sim")
-    #         return
-
-    #     dest_loc = self.task_dict[self.action[1]].location
-    #     # Get modification to position assuming travel at constant velocity
-    #     vector = self.env_model.generate_scaled_travel_vector(
-    #         self.location, dest_loc, self.sim_data["velocity"]
-    #     )
-    #     self.position_mod_vector = vector
-    #     # print("Current loc is", self.location, "Destination is", dest_loc)
-    #     # print("Position mod vector is then", vector)
-
-    # # === Helpers for detailed simulations ===
-
-    # def get_target_location(self):
-    #     if self.sim_data["basic"]:
-    #         print("No target loc because basic sim")
-    #         return
-    #     if self.action[1] == "Init":
-    #         return self.location
-    #     else:
-    #         return self.task_dict[self.action[1]].location
-
-    # def get_command_velocity(self):
-    #     """
-    #     Returns velocity command required to reach waypoint given
-    #     local flows
-    #     """
-    #     if self.sim_data["basic"]:
-    #         print("No cmd vel because basic sim")
-    #         return
-    #     # print("Position Mod:", self.position_mod_vector)
-    #     # print("Local flow:", self.flow)
-    #     cmd_vel = tuple(
-    #         self.position_mod_vector[i] - self.local_flow[i] for i in range(len(self.local_flow))
-    #     )
-    #     resultant_cmd_vel = round(
-    #         math.sqrt(cmd_vel[0] ** 2 + cmd_vel[1] ** 2), 2)
-    #     # print("Command Vel", cmd_vel)
-    #     return resultant_cmd_vel
 
 
 def generate_passengers_with_data(solver_params, sim_data, merger_params) -> list[Passenger]:

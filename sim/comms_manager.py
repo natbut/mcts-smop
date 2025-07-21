@@ -5,7 +5,6 @@ import numpy as np
 
 from sim.environment import Environment
 
-# from control.agent import Agent # TODO circular import
 
 # Message class
 
@@ -141,13 +140,21 @@ class CommsManager_Basic:
                  comms_succ_prob_p,
                  m_id
                  ) -> None:
-
+        
         self.agent_dict = {}
         for a in agent_list:
             self.agent_dict[a.id] = a
+
+        self.agent_comms_dict = {}
+        for a in agent_list:
+            neighbors = []
+            for b in agent_list:
+                if a.id != b.id:
+                    neighbors.append(True)
+            self.agent_comms_dict[a.id] = neighbors
+
         self.success_prob_m = comms_succ_prob_m
         self.success_prob_p = comms_succ_prob_p
-        self.agent_comms_dict = {}
 
         self.m_id = m_id
 

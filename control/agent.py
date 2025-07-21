@@ -1,5 +1,4 @@
 
-import math
 from copy import deepcopy
 
 import numpy as np
@@ -56,10 +55,11 @@ class Agent:
             self.ARRIVAL_THRESH = 1000  # TODO
             self.position_mod_vector = None
             self.local_flow = []  # local flow
-            self.energy_burn_rate = sim_data["energy_burn_rate"]
+            
+        self.energy_burn_rate = sim_data["energy_burn_rate"]
 
-            self.base_loc = sim_data["base_loc"]
-            self.location = sim_data["base_loc"]
+        self.base_loc = sim_data["base_loc"]
+        self.location = sim_data["base_loc"]
 
         # Communication variables
         self.stored_act_dists = {}
@@ -502,9 +502,9 @@ class Agent:
 
     def _initialize_model(self, dims: tuple) -> EnvironmentModel:
         """initialize an environment model, scaled by dimensions"""
-        if self.sim_data["basic"]:
-            print("No env model because basic sim")
-            return
+        # if self.sim_data["basic"]:
+        #     print("No env model because basic sim")
+        #     return
 
         # Dims are env coord ranges (like (100, 195))
         x_size = abs(dims[0][0] - dims[0][1])
