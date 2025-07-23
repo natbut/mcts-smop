@@ -34,8 +34,9 @@ class Mothership(Agent):
         data["budget"] = self.sim_data["budget"]
         data["start"] = self.sim_data["start"]
         data["end"] = self.sim_data["end"]
+        data["num_robots"] = len(self.group_list)
 
-        print("M Planning with:", data["graph"].vertices)
+        print("M Planning with:", data["graph"].vertices, "for", len(self.group_list), "passengers", data["num_robots"], "robots")
         # returns list of States
         solution, _, _ = sim_brvns(data["graph"],
                                    data["budget"],
@@ -57,14 +58,12 @@ class Mothership(Agent):
         print("Schedules solved:", [s.action_seq for s in solution])
 
         # Pair solution with robot ids
-        # paired_solution = {}
         for i, state in enumerate(solution):
-            # paired_solution[i] = deepcopy(state)
             self.stored_act_dists[i] = ActionDistribution(
                 [deepcopy(state)], [1])
+        # Fill out act dist to match number of robots
         for i in range(len(solution), self.solver_params["num_robots"]):
             state = random.choice(solution)
-            # paired_solution[i] = deepcopy(state)
             self.stored_act_dists[i] = ActionDistribution(
                 [deepcopy(state)], [1])
 

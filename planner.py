@@ -42,10 +42,14 @@ class HybDecPlanner:
         x_max, y_max = y_ranges
         self.task_dict = task_dict
 
+
         # Set up initial env state
         self.mothership.agent_list = self.all_agents
         self.mothership.group_list = self.passngr_list
         self.mothership.update_reachable_neighbors(self.comms_mgr)
+        self.mothership.task_dict = {} # reset
+        self.mothership.stored_act_dists = {} # reset
+        self.mothership.my_action_dist = None # reset
         self.mothership.load_tasks_on_agent(task_dict)
         for i, p in enumerate(self.passngr_list):
             p.agent_list = self.all_agents
@@ -55,6 +59,10 @@ class HybDecPlanner:
             p.update_reachable_neighbors(self.comms_mgr)
             p.env_dim_ranges = ((x_min, x_max), (y_min, y_max), (0, 0))
             p.location = workers_pos[i]
+            p.task_dict = {} # reset
+            p.my_action_dist = None # reset
+            p.stored_act_dists = {} # reset
+            p.schedule = [] # reset
             p.load_tasks_on_agent(task_dict)
 
         self.mothership.env_dim_ranges = ((x_min, x_max), (y_min, y_max), (0, 0))
@@ -70,24 +78,35 @@ class HybDecPlanner:
     
     def get_agent_plan(self, agent_id):
         plan_ids = self.passngr_list[agent_id].schedule
-        locs = [self.task_dict[id].location[:2] for id in plan_ids]
+        print(f"Passenger {agent_id} plan: {plan_ids}")
+        locs = [self.task_dict[id].location[:2] for id in plan_ids if id != self.mothership.sim_data["start"]]
         return locs
 
 
     def solve_worker_schedules(self, locations, task_dict, planning_iters=5):
         """Uses HybDec solver to decentrally solve schedules for worker robots"""
 
+        self.task_dict = task_dict
+
+        self.mothership.task_dict = {} # reset
+        self.mothership.stored_act_dists = {} # reset
+        self.mothership.my_action_dist = None
         self.mothership.load_tasks_on_agent(task_dict)
         for i, p in enumerate(self.passngr_list):
             # Update observations
             p.location = locations[i]
+            p.task_dict = {} # reset
+            p.my_action_dist = None # reset
+            p.stored_act_dists = {} # reset
+            p.schedule = [] # reset
             p.load_tasks_on_agent(task_dict)
-            p.event = True
 
         sim_config = "DHyb"
         for i in range(planning_iters):
-            if p.type == p.PASSENGER:
-                # Solve for new action distro
-                p.optimize_schedule_distr(self.comms_mgr, sim_config)
+            for p in self.passngr_list:
+                if p.type == p.PASSENGER:
+                    # Solve for new action distro
+                    p.event = True
+                    p.optimize_schedule_distr(self.comms_mgr, sim_config)
 
         print("Scheduling Done")

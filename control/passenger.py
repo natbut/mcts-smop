@@ -32,7 +32,7 @@ class Passenger(Agent):
         if (not self.event) or self.dead or self.finished:
             return
 
-        print("\n! Optimizing schedule")
+        print("\n! Optimizing schedule for ", self.id)
 
         # Send schedule request
         if "DHyb" in sim_config:
