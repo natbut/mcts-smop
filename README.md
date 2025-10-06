@@ -1,2 +1,2 @@
-# masop
-Multi-Agent Stochastic Orienteering Problem
+# SMOP
+Stochastic Multiagent Orienteering Problem
